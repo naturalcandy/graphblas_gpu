@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <cstddef>
 
 namespace graphblas_gpu {
 
@@ -13,11 +14,15 @@ struct Op {
         AllocVector,
         SpMV,
         SpMM,
+        EWiseAdd,
+        EWiseSub,
+        EWiseMul,
+        EWiseDiv
     };
 
     Type type;
-    std::string name;               // Explicit operation name for readability
-    std::vector<size_t> buffer_ids; // All associated buffer IDs clearly
+    std::string name;
+    std::vector<size_t> buffer_ids;
     std::unordered_map<std::string, std::string> args;
 };
 
@@ -29,9 +34,12 @@ public:
     const std::vector<Op>& getOps() const;
     void clear();
 
+    size_t nextBufferId();
+
 private:
     OpSequence() = default;
 
+    size_t buffer_count_ = 0; 
     std::vector<Op> ops_;
 };
 

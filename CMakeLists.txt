@@ -14,7 +14,6 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(GRAPHBLAS_CPU_SRC
     src/op_sequence.cpp
     src/semiring.cpp
-    src/vector.cpp
     src/operation.cpp
     src/executor.cpp
 )

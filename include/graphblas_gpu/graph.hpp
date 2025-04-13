@@ -13,10 +13,17 @@ class SparseMatrix {
 public:
     using Value = T;
 
+    // Initialization constructor
     SparseMatrix(size_t rows, size_t cols,
                  const std::vector<size_t>& row_offsets,
                  const std::vector<size_t>& col_indices,
                  const std::vector<Value>& values);
+    
+    // Staging op constructor
+    SparseMatrix(size_t rows, size_t cols, size_t buffer_id);
+
+    size_t numRows() const { return rows_; }
+    size_t numCols() const { return cols_; }
 
     size_t bufferId() const;
     size_t bytes() const;
@@ -41,10 +48,8 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
       row_offsets_(row_offsets),
       col_indices_(col_indices),
       values_(values),
-      datatype_name_(typeid(Value).name()) {
-
-    static size_t global_buffer_counter = 0;
-    buffer_id_ = global_buffer_counter++;
+      datatype_name_(typeid(Value).name()),
+      buffer_id_(OpSequence::getInstance().nextBufferId()) {
 
     OpSequence::getInstance().addOp({
         Op::Type::AllocGraph,
@@ -58,6 +63,13 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
         }
     });
 }
+
+template <typename T>
+SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols, size_t buffer_id)
+    : rows_(rows), cols_(cols),
+      buffer_id_(buffer_id),
+      datatype_name_(typeid(Value).name()) { }
+
 
 template <typename T>
 size_t SparseMatrix<T>::bufferId() const {

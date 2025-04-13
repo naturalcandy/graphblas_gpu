@@ -19,4 +19,8 @@ void OpSequence::clear() {
     ops_.clear();
 }
 
+size_t OpSequence::nextBufferId() {
+    return buffer_count_++;
+}
+
 } // namespace graphblas_gpu
