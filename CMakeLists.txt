@@ -22,6 +22,7 @@ set(GRAPHBLAS_GPU_SRC
     kernels/spmv.cu
     kernels/spmm.cu
     kernels/kernel_generator.cpp
+    kernels/spmv_csr.cu
 )
 
 add_library(graphblas_gpu STATIC ${GRAPHBLAS_CPU_SRC} ${GRAPHBLAS_GPU_SRC})
@@ -43,4 +44,5 @@ install(DIRECTORY include/ DESTINATION include)
 install(TARGETS graphblas_gpu DESTINATION lib)
 
 add_executable(test_graphblas test_main.cpp)
+add_executable(dense_vs_csr dense_vs_csr.cpp)
 target_link_libraries(test_graphblas graphblas_gpu)

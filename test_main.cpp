@@ -1,6 +1,51 @@
 #include <graphblas_gpu/graph.hpp>
 #include <graphblas_gpu/op_sequence.hpp>
+#include <graphblas_gpu/spmv_csr.hpp>
 #include <iostream>
+#include <cassert>
+
+
+int test_mat_to_csr(){
+    double m[] = {2, 0, -1, 3, 0, 0, 5, 0, 0, 4, 0, 0, 1, 0, -5, 6, 7, 0, 2, 0, 0, 0, 3, 0, 9};
+    int num_rows = 5;
+    int num_cols = 5;
+    int* csr_row_offsets;
+    int* csr_cols;
+    double* csr_vals;
+    int nnz = 0;
+
+    int correct_row_offsets[] = {0, 3, 5, 7, 10, 12};
+    int correct_cols[] = {0, 2, 3, 1, 4, 2, 4, 0, 1, 3, 2, 4};
+    double correct_vals[] = {2, -1, 3, 5, 4, 1, -5, 6, 7, 2, 3, 9};
+    graphblas_gpu::kernels::matrix_to_csr(m, num_rows, num_cols, &csr_row_offsets, &csr_cols, &csr_vals, &nnz, 512);
+    // std::cout << "Row offsets: \n";
+    for (int i = 0; i < num_rows + 1; ++i) {
+        // std::cout << csr_row_offsets[i] << " ";
+        if (csr_row_offsets[i] != correct_row_offsets[i]) {
+            std::cout << "\nRow offsets do not match at index " << i << "\n";
+            return 0;
+        }
+    }
+
+    // std::cout << "\nCols: ";
+    for (int i = 0; i < nnz; ++i) {
+        // std::cout << csr_cols[i] << " ";
+        if (csr_cols[i] != correct_cols[i]) {
+            std::cout << "\nCols do not match at index " << i << "\n";
+            return 0;
+        }
+    }
+
+    // std::cout << "\nVals: ";
+    for (int i = 0; i < nnz; ++i) {
+        // std::cout << csr_vals[i] << " ";
+        if (csr_vals[i] != correct_vals[i]) {
+            std::cout << "\nVals do not match at index " << i << "\n";
+            return 0;
+        }
+    }
+    return 1;
+}
 
 int main() {
     using namespace graphblas_gpu;
@@ -39,5 +84,8 @@ int main() {
         std::cout << "------\n";
     }
 
+    assert(test_mat_to_csr());
+    
+    std::cout << "ALL TESTS PASSED\n";
     return 0;
 }
