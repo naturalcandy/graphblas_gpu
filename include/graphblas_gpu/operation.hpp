@@ -18,7 +18,7 @@ public:
             Op::Type::EWiseAdd,
             "EWiseAdd",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataTypeName()} }
+            { {"datatype", lhs.dataType().toString()} }
         });
 
         return Vector<T>(lhs.size(), buffer_id);
@@ -30,7 +30,7 @@ public:
             Op::Type::EWiseSub,
             "EWiseSub",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataTypeName()} }
+            { {"datatype", lhs.dataType().toString()} }
         });
 
         return Vector<T>(lhs.size(), buffer_id);
@@ -42,7 +42,7 @@ public:
             Op::Type::EWiseMul,
             "EWiseMul",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataTypeName()} }
+            { {"datatype", lhs.dataType().toString()} }
         });
 
         return Vector<T>(lhs.size(), buffer_id);
@@ -54,7 +54,7 @@ public:
             Op::Type::EWiseDiv,
             "EWiseDiv",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataTypeName()} }
+            { {"datatype", lhs.dataType().toString()} }
         });
 
         return Vector<T>(lhs.size(), buffer_id);
@@ -75,7 +75,7 @@ public:
             buffer_ids,
             {
                 {"semiring", std::to_string(static_cast<int>(semiring))},
-                {"datatype", vec.dataTypeName()},
+                {"datatype", vec.dataType().toString()},
                 {"mask", mask ? "true" : "false"}
             }
         });
@@ -98,7 +98,7 @@ public:
             buffer_ids,
             {
                 {"semiring", std::to_string(static_cast<int>(semiring))},
-                {"datatype", A.dataTypeName()},
+                {"datatype", A.dataType().toString()},
                 {"mask", mask ? "true" : "false"}
             }
         });
