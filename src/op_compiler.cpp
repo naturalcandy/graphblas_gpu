@@ -1,11 +1,12 @@
 #include <graphblas_gpu/op_compiler.hpp>
 #include <graphblas_gpu/kernel_generator.hpp>
-#include <cuda_runtime.h>    
-#include <cuda.h>           
+#include <cuda_runtime.h>
+#include <cuda.h>
+#include <nvrtc.h>
+#include <fstream>
 #include <iostream>
-
-
-
+#include <vector>
+#include <unistd.h>
 
 namespace graphblas_gpu {
 
@@ -15,10 +16,14 @@ OpCompiler& OpCompiler::getInstance() {
 }
 
 OpCompiler::OpCompiler() 
-    : is_compiled_(false), 
+    : is_compiled_(false),
+      kernel_loaded_(false),
       total_memory_bytes_(0), 
       device_memory_(nullptr), 
+      kernel_function_(nullptr),
       iteration_flag_(nullptr) {
+    
+    cuInit(0);
 }
 
 OpCompiler::~OpCompiler() {
@@ -244,26 +249,138 @@ void OpCompiler::allocateBuffers() {
         }
         std::cout << "Successfully allocated " << (total_memory_bytes_ / (1024.0 * 1024.0)) 
                   << " MB of GPU memory at " << device_memory_ << std::endl;
+                  
+        // Initialize all memory to zero
+        cudaMemset(device_memory_, 0, total_memory_bytes_);
     } else {
         std::cout << "No memory allocation needed" << std::endl;
     }
-    
 }
-
 
 void OpCompiler::generateKernel() {
     // Create kernel generator with operations and buffer offsets
     KernelGenerator generator(OpSequence::getInstance().getOps(), buffer_offsets_);
     
     // Generate CUDA source code
-    std::string kernel_code = generator.generateCode();
+    kernel_code_ = generator.generateCode();
+    kernel_name_ = generator.getKernelName();
     
     // Print the generated code for validation
     std::cout << "===== Generated Kernel Code =====" << std::endl;
-    std::cout << kernel_code << std::endl;
+    std::cout << kernel_code_ << std::endl;
     std::cout << "=================================" << std::endl;
     
-    // Store the code or compile it...
+    // Compile the kernel
+    kernel_loaded_ = compileAndLoadKernel(kernel_code_);
+    
+    if (!kernel_loaded_) {
+        std::cerr << "ERROR: Failed to compile and load kernel" << std::endl;
+    }
+}
+
+bool OpCompiler::compileAndLoadKernel(const std::string& kernel_code) {
+    // Generate a unique filename based on a hash of the kernel code
+    std::string hash = std::to_string(std::hash<std::string>{}(kernel_code));
+    std::string temp_dir = "/tmp";
+    std::string code_file_path = temp_dir + "/graphblas_kernel_" + hash + ".cu";
+    std::string bin_file_path = temp_dir + "/graphblas_kernel_" + hash + ".cubin";
+    
+    // Check if we already have a cached binary for this kernel
+    if (is_file_exists(bin_file_path)) {
+        std::cout << "Using cached binary for kernel" << std::endl;
+    } else {
+        // Write the kernel code to a file
+        std::ofstream code_file(code_file_path, std::ios::out | std::ios::trunc);
+        if (!code_file.is_open()) {
+            std::cerr << "ERROR: Failed to open file for writing: " << code_file_path << std::endl;
+            return false;
+        }
+        code_file << kernel_code;
+        code_file.close();
+        
+        // Build the compilation command
+        std::stringstream compile_cmd;
+        compile_cmd << "nvcc -cubin";
+        
+        // Add include paths
+        compile_cmd << " -I/usr/local/cuda/include";
+        compile_cmd << " -I" << PROJECT_SOURCE_DIR << "/include";
+        compile_cmd << " -I" << PROJECT_SOURCE_DIR << "/kernels";
+        
+        // Add architecture
+        compile_cmd << " -gencode arch=compute_75,code=sm_75";
+        
+        // Add input and output files
+        compile_cmd << " -o " << bin_file_path;
+        compile_cmd << " " << code_file_path;
+        compile_cmd << " 2>&1";
+        
+        std::cout << "Compiling kernel with command: " << compile_cmd.str() << std::endl;
+        
+        // Execute the compilation command
+        FILE* pipe = popen(compile_cmd.str().c_str(), "r");
+        if (!pipe) {
+            std::cerr << "ERROR: Failed to execute compilation command" << std::endl;
+            return false;
+        }
+        
+        // Read and display any compiler output
+        char buffer[4096];
+        std::string output;
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            output += buffer;
+        }
+        
+        int status = pclose(pipe);
+        if (status != 0) {
+            std::cerr << "Compilation failed:\n" << output << std::endl;
+            return false;
+        }
+        
+        std::cout << "Kernel compilation successful" << std::endl;
+    }
+    
+    // Load the compiled binary
+    std::ifstream bin_file(bin_file_path, std::ios::binary | std::ios::ate);
+    if (!bin_file.is_open()) {
+        std::cerr << "ERROR: Failed to open binary file: " << bin_file_path << std::endl;
+        return false;
+    }
+    
+    size_t size = bin_file.tellg();
+    bin_file.seekg(0, std::ios::beg);
+    std::vector<char> binary(size);
+    if (!bin_file.read(binary.data(), size)) {
+        std::cerr << "ERROR: Failed to read binary file" << std::endl;
+        return false;
+    }
+    bin_file.close();
+    
+    // Load the module
+    CUresult result = cuModuleLoadData(&cuModule_, binary.data());
+    if (result != CUDA_SUCCESS) {
+        const char* error_str;
+        cuGetErrorString(result, &error_str);
+        std::cerr << "ERROR: Failed to load module: " << error_str << std::endl;
+        return false;
+    }
+    
+    // Get the kernel function
+    result = cuModuleGetFunction(&kernel_function_, cuModule_, kernel_name_.c_str());
+    if (result != CUDA_SUCCESS) {
+        const char* error_str;
+        cuGetErrorString(result, &error_str);
+        std::cerr << "ERROR: Failed to get kernel function: " << error_str << std::endl;
+        cuModuleUnload(cuModule_);
+        return false;
+    }
+    
+    return true;
+}
+
+bool OpCompiler::is_file_exists(const std::string& filename) {
+    std::ifstream file(filename);
+    return file.good();
 }
 
 void OpCompiler::execute(int iterations) {
@@ -272,17 +389,52 @@ void OpCompiler::execute(int iterations) {
         return;
     }
     
+    if (!kernel_loaded_) {
+        std::cerr << "Error: Kernel not loaded" << std::endl;
+        return;
+    }
+    
     // Set iteration flag for loop control
     *iteration_flag_ = iterations;
     
-    // placeholders
+    // Launch parameters
     int block_size = 256;
-    int grid_size = (total_memory_bytes_ + block_size - 1) / block_size;
+    int grid_size = std::min(65535, static_cast<int>((total_memory_bytes_ + block_size - 1) / block_size));
     
-    // Launch the kernel (do this l8ter)
+    // If grid_size is too small, make it at least 1
+    if (grid_size < 1) grid_size = 1;
+    
+    std::cout << "Launching kernel with grid_size=" << grid_size 
+              << ", block_size=" << block_size << std::endl;
+    
+    // Set up kernel arguments
+    void* args[] = {&device_memory_, iteration_flag_};
+    
+    // Launch the kernel
+    CUresult result = cuLaunchKernel(
+        kernel_function_,
+        grid_size, 1, 1,             // Grid dimensions
+        block_size, 1, 1,            // Block dimensions
+        0,                           // Shared mem size
+        nullptr,                     // Stream
+        args,                        // Args
+        nullptr                      
+    );
+    
+    if (result != CUDA_SUCCESS) {
+        const char* error_str;
+        cuGetErrorString(result, &error_str);
+        std::cerr << "Error launching kernel: " << error_str << std::endl;
+        return;
+    }
     
     // Synchronize to ensure completion
-    cudaDeviceSynchronize();
+    result = cuCtxSynchronize();
+    if (result != CUDA_SUCCESS) {
+        const char* error_str;
+        cuGetErrorString(result, &error_str);
+        std::cerr << "Error synchronizing context: " << error_str << std::endl;
+    }
 }
 
 void OpCompiler::reset() {
@@ -296,7 +448,12 @@ void OpCompiler::reset() {
         device_memory_ = nullptr;
     }
     
-    //kernel_generator_.reset();
+    if (kernel_loaded_) {
+        cuModuleUnload(cuModule_);
+        kernel_loaded_ = false;
+        kernel_function_ = nullptr;
+    }
+    
     buffer_offsets_.clear();
     total_memory_bytes_ = 0;
     is_compiled_ = false;

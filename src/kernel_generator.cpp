@@ -22,7 +22,8 @@ std::string KernelGenerator::generateCode() {
     
     // Add includes
     ss << "#include <cuda_runtime.h>\n";
-    ss << "#include \"kernels/ewise_ops.h\"\n\n";
+    ss << "#include <ewise_ops.h>\n";
+    ss << "#include <ewise_ops.cu>\n\n";  // Include the implementation file
     
     // Main kernel function
     ss << "extern \"C\" __global__ void " << kernel_name_ << "(char* buffer, int num_iterations";

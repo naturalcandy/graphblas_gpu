@@ -8,6 +8,9 @@
 #include <unordered_map>
 #include <vector>
 #include <iostream>
+#include <set>
+#include <string>
+#include <cuda.h>
 
 
 namespace graphblas_gpu {
@@ -44,8 +47,10 @@ private:
     
     void allocateBuffers();
     void generateKernel();
+    bool compileAndLoadKernel(const std::string& kernel_code);
     
     bool is_compiled_;
+    bool kernel_loaded_;
     
     // Map buffer IDs to GPU memory offsets
     std::unordered_map<size_t, size_t> buffer_offsets_;
@@ -56,11 +61,18 @@ private:
     // GPU memory
     void* device_memory_;
     
-    // Kernel generation
-    // std::unique_ptr<KernelGenerator> kernel_generator_;
-    
     // Atomic for loop control
     int* iteration_flag_;
+
+    // Runtime compilation
+    std::string kernel_code_;
+    std::string kernel_name_;
+    
+    // CUDA driver API resources
+    CUmodule cuModule_;
+    CUfunction kernel_function_;
+
+    bool is_file_exists(const std::string& filename);
 };
 
 } // namespace graphblas_gpu
