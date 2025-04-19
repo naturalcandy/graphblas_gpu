@@ -7,18 +7,21 @@
 namespace graphblas_gpu {
 namespace kernels {
 
-// Template declarations for element-wise operations
 template <typename T>
-void ewiseAdd(const T* a, const T* b, T* c, size_t size, cudaStream_t stream = 0);
+__device__ inline void ewise_add(const T* a, const T* b, T* c, 
+                               size_t index);
 
 template <typename T>
-void ewiseSub(const T* a, const T* b, T* c, size_t size, cudaStream_t stream = 0);
+__device__ inline void ewise_sub(const T* a, const T* b, T* c, 
+                               size_t index);
 
 template <typename T>
-void ewiseMul(const T* a, const T* b, T* c, size_t size, cudaStream_t stream = 0);
+__device__ inline void ewise_mul(const T* a, const T* b, T* c, 
+                               size_t index);
 
 template <typename T>
-void ewiseDiv(const T* a, const T* b, T* c, size_t size, cudaStream_t stream = 0);
+__device__ inline void ewise_div(const T* a, const T* b, T* c, 
+                               size_t index);
 
 } // namespace kernels
 } // namespace graphblas_gpu

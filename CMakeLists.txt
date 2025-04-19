@@ -10,13 +10,13 @@ set(CMAKE_CUDA_ARCHITECTURES 75)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# Add this line to find CUDA includes for all targets
 find_package(CUDAToolkit REQUIRED)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
 
 set(GRAPHBLAS_CPU_SRC
     src/op_sequence.cpp
     src/op_compiler.cpp
+    src/kernel_generator.cpp
 )
 
 set(GRAPHBLAS_GPU_SRC
@@ -41,7 +41,6 @@ set_target_properties(graphblas_gpu PROPERTIES
     CUDA_RESOLVE_DEVICE_SYMBOLS ON 
 )
 
-# Add this line to explicitly include CUDA headers for your library
 target_include_directories(graphblas_gpu PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 
 install(DIRECTORY include/ DESTINATION include)
@@ -52,11 +51,9 @@ target_link_libraries(test_graphblas graphblas_gpu)
 
 add_executable(test_ewise_kernels test_ewise_kernels.cpp)
 target_link_libraries(test_ewise_kernels graphblas_gpu)
-# Add CUDA include directories for the test
 target_include_directories(test_ewise_kernels PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
 
 add_executable(test_opscheduele test_opscheduele.cpp)
 target_link_libraries(test_opscheduele graphblas_gpu)
-# Add CUDA include directories for the test
 target_include_directories(test_opscheduele PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
