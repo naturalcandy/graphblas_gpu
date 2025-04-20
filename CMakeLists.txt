@@ -10,7 +10,8 @@ add_definitions(-DPROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 # RTX 2080 GPU (Compute Capability 7.5)
 set(CMAKE_CUDA_ARCHITECTURES 75)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${INC_DIR})
 
 find_package(CUDAToolkit REQUIRED)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
@@ -24,8 +25,7 @@ set(GRAPHBLAS_CPU_SRC
 )
 
 set(GRAPHBLAS_GPU_SRC
-    kernels/spmv.cu
-    kernels/spmm.cu
+    kernels/spmv_csr.cu
     kernels/ewise_ops.cu 
 )
 
@@ -45,7 +45,7 @@ set_target_properties(graphblas_gpu PROPERTIES
     CUDA_RESOLVE_DEVICE_SYMBOLS ON 
 )
 
-target_include_directories(graphblas_gpu PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+target_include_directories(graphblas_gpu PUBLIC ${INC_DIR} ${CMAKE_SOURCE_DIR}/kernels ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(graphblas_gpu ${CUDA_DRIVER_LIB})
 
 install(DIRECTORY include/ DESTINATION include)

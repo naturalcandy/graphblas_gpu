@@ -1,7 +1,9 @@
 #include <graphblas_gpu/kernel_generator.hpp>
 #include <sstream>
 #include <unordered_map>
-#include "../kernels/ewise_ops.h"
+#include <set>
+#include <string>
+#include <graphblas_gpu/op_sequence.hpp>
 
 namespace graphblas_gpu {
 
@@ -20,10 +22,8 @@ std::string KernelGenerator::getKernelName() const {
 std::string KernelGenerator::generateCode() {
     std::stringstream ss;
     
-    // Add includes
-    ss << "#include <cuda_runtime.h>\n";
-    ss << "#include <ewise_ops.h>\n";
-    ss << "#include <ewise_ops.cu>\n\n"; 
+    ss << "#include <graphblas_gpu/kernels/graphblas_kernels.hpp>\n\n";
+  
     
     // Main kernel function
     ss << "extern \"C\" __global__ void " << kernel_name_ << "(char* buffer, int num_iterations";

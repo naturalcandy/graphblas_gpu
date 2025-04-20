@@ -1,5 +1,5 @@
-#ifndef GRAPHBLAS_GPU_EWISE_OPS_H
-#define GRAPHBLAS_GPU_EWISE_OPS_H
+#ifndef GRAPHBLAS_GPU_EWISE_OPS_HPP
+#define GRAPHBLAS_GPU_EWISE_OPS_HPP
 
 #include <cuda_runtime.h>
 #include <cstddef>
@@ -26,4 +26,4 @@ __device__ inline void ewise_div(const T* a, const T* b, T* c,
 } // namespace kernels
 } // namespace graphblas_gpu
 
-#endif // GRAPHBLAS_GPU_EWISE_OPS_H
+#endif // GRAPHBLAS_GPU_EWISE_OPS_HPP

@@ -1,6 +1,6 @@
 #include <cuda_runtime.h>
 #include <cstdio>
-#include <graphblas_gpu/spmv_csr.hpp>
+#include <graphblas_gpu/kernels/spmv_csr.hpp>
 #include <iostream>
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>

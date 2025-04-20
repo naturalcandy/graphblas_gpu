@@ -1,4 +1,4 @@
-#include "ewise_ops.h"
+#include <graphblas_gpu/kernels/ewise_ops.hpp>
 
 namespace graphblas_gpu {
 namespace kernels {

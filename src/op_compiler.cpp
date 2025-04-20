@@ -7,6 +7,8 @@
 #include <iostream>
 #include <vector>
 #include <unistd.h>
+#include <iostream>
+#include <algorithm>
 
 namespace graphblas_gpu {
 
@@ -233,11 +235,21 @@ void OpCompiler::allocateBuffers() {
                           << " not supported yet" << std::endl;
         }
     }
+    std::vector<size_t> buffer_ids;
+    for (const auto& [buffer_id, _] : buffer_info_map) {
+        buffer_ids.push_back(buffer_id);
+    }
+    std::sort(buffer_ids.begin(), buffer_ids.end()); 
     // Now we assign offsets and total buffer size to allocate on device
-    for (const auto& [buffer_id, buf_info] : buffer_info_map) {
-        size_t aligned_size = (buf_info.size_bytes + 255) & ~255; // 256-byte alignment
+    // should we allocate buffers that end up not being used in computation
+    // or is that user's responsibility..
+    for (size_t buffer_id : buffer_ids) {
+        const auto& buf_info = buffer_info_map[buffer_id];
+        size_t aligned_size = (buf_info.size_bytes + 255) & ~255; 
         buffer_offsets_[buffer_id] = total_memory_bytes_;
         total_memory_bytes_ += aligned_size;
+
+        std::cout << "BUFFER ID: " << buffer_id << ", OFFSET: " << buffer_offsets_[buffer_id] << std::endl;
     }
 
     if (total_memory_bytes_ > 0) {

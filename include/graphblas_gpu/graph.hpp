@@ -8,6 +8,16 @@
 
 namespace graphblas_gpu {
 
+
+// We shoudl support multiply compressed format and build
+// runtime classification layer based on sparsity pattern of input
+enum class DataFormat {
+    CSR,
+    COO,
+    // come up with any more as we see fit.
+    };
+      
+
 template <typename T>
 class SparseMatrix {
 public:
@@ -19,7 +29,7 @@ public:
                  const std::vector<size_t>& col_indices,
                  const std::vector<Value>& values);
     
-    // Staging op constructor
+    // Staging op constructor  (later on add a data format field as input here)
     SparseMatrix(size_t rows, size_t cols, size_t buffer_id);
 
     size_t numRows() const { return rows_; }
@@ -30,6 +40,7 @@ public:
     size_t bytes() const;
     const std::string& dataTypeName() const;
     DataType dataType() const;
+    DataFormat format() const { return format_; }
 
 private:
     size_t rows_, cols_;
@@ -37,8 +48,10 @@ private:
     std::vector<Value> values_;
     size_t buffer_id_;
     DataType datatype_;
+    DataFormat format_;
 };
 
+// CSR sparse matrix initialization
 template <typename T>
 SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
                               const std::vector<size_t>& row_offsets,
@@ -49,7 +62,9 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
       col_indices_(col_indices),
       values_(values),
       datatype_(TypeToDataType<T>::value()),
-      buffer_id_(OpSequence::getInstance().nextBufferId()) {
+      buffer_id_(OpSequence::getInstance().nextBufferId()),
+      format_(DataFormat::CSR) 
+    {
 
     OpSequence::getInstance().addOp({
         Op::Type::AllocGraph,
@@ -64,6 +79,7 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
     });
 }
 
+// Initialize sparse matrix that are products of intermediate computation.
 template <typename T>
 SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols, size_t buffer_id)
     : rows_(rows), cols_(cols),
@@ -78,10 +94,8 @@ size_t SparseMatrix<T>::bufferId() const {
 
 template <typename T>
 size_t SparseMatrix<T>::bytes() const {
-    // CSR format requires:
-    // - row_offsets array of size (rows + 1)
-    // - col_indices array of size nnz
-    // - values array of size nnz
+    // we should case on the format of matrix here..
+    // for now we will assume input is a CSR matrix
     return (rows_ + 1) * sizeof(size_t) +    // row_offsets
            values_.size() * sizeof(size_t) +  // col_indices
            values_.size() * datatype_.sizeInBytes(); // values
