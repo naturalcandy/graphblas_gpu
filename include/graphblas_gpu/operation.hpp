@@ -14,52 +14,72 @@ class Operations {
 public:
     static Vector<T> add(const Vector<T>& lhs, const Vector<T>& rhs) {
         size_t buffer_id = OpSequence::getInstance().nextBufferId();
+        size_t result_size = lhs.size();
         OpSequence::getInstance().addOp({
             Op::Type::EWiseAdd,
             "EWiseAdd",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataType().toString()} }
+            { 
+                {"datatype", lhs.dataType().toString()}, 
+                {"size", std::to_string(result_size)}
+            }
         });
 
-        return Vector<T>(lhs.size(), buffer_id);
+        return Vector<T>(result_size, buffer_id);
     }
 
     static Vector<T> sub(const Vector<T>& lhs, const Vector<T>& rhs) {
         size_t buffer_id = OpSequence::getInstance().nextBufferId();
+        size_t result_size = lhs.size();
         OpSequence::getInstance().addOp({
             Op::Type::EWiseSub,
             "EWiseSub",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataType().toString()} }
+            { 
+                {"datatype", lhs.dataType().toString()}, 
+                {"size", std::to_string(result_size)}
+            
+            }
         });
 
-        return Vector<T>(lhs.size(), buffer_id);
+        return Vector<T>(result_size, buffer_id);
     }
 
     static Vector<T> mul(const Vector<T>& lhs, const Vector<T>& rhs) {
         size_t buffer_id = OpSequence::getInstance().nextBufferId();
+        size_t result_size = lhs.size();
         OpSequence::getInstance().addOp({
             Op::Type::EWiseMul,
             "EWiseMul",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataType().toString()} }
+            { 
+                {"datatype", lhs.dataType().toString()}, 
+                {"size", std::to_string(result_size)}
+            
+            }
         });
 
-        return Vector<T>(lhs.size(), buffer_id);
+        return Vector<T>(result_size, buffer_id);
     }
 
     static Vector<T> div(const Vector<T>& lhs, const Vector<T>& rhs) {
         size_t buffer_id = OpSequence::getInstance().nextBufferId();
+        size_t result_size = lhs.size();
         OpSequence::getInstance().addOp({
             Op::Type::EWiseDiv,
             "EWiseDiv",
             {buffer_id, lhs.bufferId(), rhs.bufferId()},
-            { {"datatype", lhs.dataType().toString()} }
+            { 
+                {"datatype", lhs.dataType().toString()},
+                {"size", std::to_string(result_size)}
+            }
         });
 
-        return Vector<T>(lhs.size(), buffer_id);
+        return Vector<T>(result_size, buffer_id);
     }
 
+
+    // will look into this spmv and related kernels alter.
     static Vector<T> spmv(const SparseMatrix<T>& mat,
                           const Vector<T>& vec,
                           SemiringType semiring,

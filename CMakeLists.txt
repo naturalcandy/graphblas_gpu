@@ -51,13 +51,4 @@ target_link_libraries(graphblas_gpu ${CUDA_DRIVER_LIB})
 install(DIRECTORY include/ DESTINATION include)
 install(TARGETS graphblas_gpu DESTINATION lib)
 
-add_executable(test_graphblas test_main.cpp)
-target_link_libraries(test_graphblas graphblas_gpu)
-
-add_executable(test_ewise_kernels test_ewise_kernels.cpp)
-target_link_libraries(test_ewise_kernels graphblas_gpu)
-target_include_directories(test_ewise_kernels PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-
-add_executable(test_opscheduele test_opscheduele.cpp)
-target_link_libraries(test_opscheduele graphblas_gpu)
-target_include_directories(test_opscheduele PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+add_subdirectory(tests)

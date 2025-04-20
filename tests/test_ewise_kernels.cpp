@@ -9,7 +9,6 @@ int main() {
     graphblas_gpu::OpSequence::getInstance().clear();
     
     std::cout << "===== Testing Full Kernel Execution =====" << std::endl;
-    
     // Create test vectors 
     const size_t size = 1024;
     std::vector<float> h_a(size, 1.0f);

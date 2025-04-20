@@ -4,6 +4,7 @@
 #include <string>
 #include <stdexcept>
 #include <unordered_map>
+#include <cstdint> 
 
 namespace graphblas_gpu {
 
@@ -40,8 +41,8 @@ public:
         switch (type_) {
             case DataTypeEnum::Float: return sizeof(float);
             case DataTypeEnum::Double: return sizeof(double);
-            case DataTypeEnum::Int32: return sizeof(int);
-            case DataTypeEnum::Int64: return sizeof(long long);
+            case DataTypeEnum::Int32: return sizeof(int32_t);
+            case DataTypeEnum::Int64: return sizeof(int64_t);
             case DataTypeEnum::Bool: return sizeof(bool);
             default: throw std::runtime_error("Unknown data type");
         }
