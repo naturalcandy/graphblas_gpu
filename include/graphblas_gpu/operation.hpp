@@ -96,7 +96,10 @@ public:
             {
                 {"semiring", std::to_string(static_cast<int>(semiring))},
                 {"datatype", vec.dataType().toString()},
-                {"mask", mask ? "true" : "false"}
+                {"mask", mask ? "true" : "false"},
+                {"format", mat.format()},
+                {"num_rows", std::to_string(mat.numRows())},
+                {"nnz", std::to_string(mat.nnz())}
             }
         });
 

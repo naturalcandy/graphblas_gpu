@@ -4,6 +4,7 @@
 #include <set>
 #include <string>
 #include <graphblas_gpu/op_sequence.hpp>
+#include <graphblas_gpu/graph.hpp>
 
 namespace graphblas_gpu {
 
@@ -23,6 +24,9 @@ std::string KernelGenerator::generateCode() {
     std::stringstream ss;
     
     ss << "#include <graphblas_gpu/kernels/graphblas_kernels.hpp>\n\n";
+    // omit if we do tree based grid sync
+    ss << "#include <cooperative_groups.h>\n\n";
+    ss << "namespace cg = cooperative_groups;\n\n";
   
     
     // Main kernel function
@@ -37,6 +41,10 @@ std::string KernelGenerator::generateCode() {
     ss << "    // Get thread index\n";
     ss << "    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;\n";
     ss << "    size_t grid_size = gridDim.x * blockDim.x;\n\n";
+    // this should be ommitted if we are doing our tree based grid sync..
+    ss << "    // Create grid-wide group for end of iteration sync\n";
+    ss << "    auto grid = cg::this_grid();\n";
+    ss << "    auto block = cg::this_thread_block();\n\n";
     
     // Execute operations for each iteration if needed
     ss << "    for (int iter = 0; iter < num_iterations; iter++) {\n";
@@ -79,8 +87,43 @@ std::string KernelGenerator::generateCode() {
             }
             
             case Op::Type::SpMV: {
-                // TODO: Implement SpMV operation
-                ss << "        // SpMV operation - Not yet implemented\n";
+                // TODO: Implement SpMV by casing on storage pattern of input matrix
+                // Get buffer IDs
+                if (op.args.at("format") == "CSR") {
+                    size_t resultId = op.buffer_ids[0];
+                    size_t matrixId = op.buffer_ids[1];
+                    size_t vectorId = op.buffer_ids[2];
+                    
+                    // Get buffer offsets
+                    size_t resultOffset = buffer_id_to_offset_.at(resultId);
+                    size_t matrixOffset = buffer_id_to_offset_.at(matrixId);
+                    size_t vectorOffset = buffer_id_to_offset_.at(vectorId);
+                    
+                    // Get parameters
+                    std::string datatype = op.args.at("datatype");
+                    size_t num_rows = std::stoul(op.args.at("num_rows"));
+                    
+                    // Calculate offsets for CSR format components
+                    size_t row_offsets_size = (num_rows + 1) * sizeof(size_t);
+                    size_t nnz = std::stoul(op.args.at("nnz"));
+                    size_t col_indices_size = nnz * sizeof(size_t);
+
+                    size_t row_offsets_offset = matrixOffset;
+                    size_t col_indices_offset = matrixOffset + row_offsets_size;
+                    size_t values_offset = col_indices_offset + col_indices_size;
+
+                    // Generate SpMV code
+                    ss << "        // SpMV operation\n";
+                    ss << "        graphblas_gpu::kernels::spmv_csr<" << datatype << ">(\n";
+                    ss << "            (size_t*)(buffer + " << row_offsets_offset << "),\n";
+                    ss << "            (size_t*)(buffer + " << col_indices_offset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << values_offset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << resultOffset << "),\n";
+                    ss << "            " << num_rows << ");\n";
+                    break;
+                }
+                // TODO: support diff spmv kernel based on format of input graph..
                 break;
             }
             
@@ -96,7 +139,10 @@ std::string KernelGenerator::generateCode() {
     }
     
     // Add necessary synchronization between iterations
-    ss << "        __syncthreads();\n";
+    // again here we should change how we do grid sync based on logic in
+    // our op compiler. most likely if number of blocks are too large for us
+    // to do a cooperative launch we use our own custom grid syc.
+    ss << "        grid.sync();\n";
     ss << "    }\n";  // End of iteration loop
     ss << "}\n";
     

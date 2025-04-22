@@ -4,16 +4,17 @@
 namespace graphblas_gpu{
 namespace kernels {
 
-void exclusive_scan(int* device_data, int length);
+// Thread -> Row mapping
+template <typename T>
+__device__ void spmv_csr(const size_t* row_offsets,
+                        const size_t* col_indices,
+                        const T* values,
+                        const T* vector,
+                        T* output,
+                        size_t num_rows);
 
-void matrix_to_csr(double* matrix,
-    int num_rows,
-    int num_cols,
-    int** row_offsets,
-    int** cols,
-    double** vals,
-    int* nnz,
-    int threads_per_block);
+
+// do warp level implementation also..
 
 } // namespace kernels
 } // namespace graphblas_gpu

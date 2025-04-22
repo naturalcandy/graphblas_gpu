@@ -277,10 +277,6 @@ void OpCompiler::generateKernel() {
     kernel_code_ = generator.generateCode();
     kernel_name_ = generator.getKernelName();
     
-    // Print the generated code for validation
-    std::cout << "===== Generated Kernel Code =====" << std::endl;
-    std::cout << kernel_code_ << std::endl;
-    std::cout << "=================================" << std::endl;
     
     // Compile the kernel
     kernel_loaded_ = compileAndLoadKernel(kernel_code_);
@@ -421,8 +417,12 @@ void OpCompiler::execute(int iterations) {
     
     // Set up kernel arguments
     void* args[] = {&device_memory_, iteration_flag_};
-    
-    // Launch the kernel
+
+    /* 
+        
+    // cooperative kernel has strong limitation on max threads..
+    // perahps we can case on whether or not we do coopeartive
+    // kernel launch or regular launch with our own custom grid sync.
     CUresult result = cuLaunchKernel(
         kernel_function_,
         grid_size, 1, 1,             // Grid dimensions
@@ -431,6 +431,18 @@ void OpCompiler::execute(int iterations) {
         nullptr,                     // Stream
         args,                        // Args
         nullptr                      
+    );
+    
+    */
+    
+    // Launch the kernel
+    CUresult result = cuLaunchCooperativeKernel(
+        kernel_function_,
+        grid_size, 1, 1,             // Grid dimensions
+        block_size, 1, 1,            // Block dimensions
+        0,                           // Shared mem size
+        nullptr,                     // Stream
+        args                         // Args                    
     );
     
     if (result != CUDA_SUCCESS) {

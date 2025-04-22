@@ -5,17 +5,13 @@
 #include <cstddef>
 #include <graphblas_gpu/op_sequence.hpp>
 #include <graphblas_gpu/data_type.hpp>
+#include <string>
 
 namespace graphblas_gpu {
 
 
 // We shoudl support multiply compressed format and build
 // runtime classification layer based on sparsity pattern of input
-enum class DataFormat {
-    CSR,
-    COO,
-    // come up with any more as we see fit.
-    };
       
 
 template <typename T>
@@ -40,7 +36,8 @@ public:
     size_t bytes() const;
     const std::string& dataTypeName() const;
     DataType dataType() const;
-    DataFormat format() const { return format_; }
+    std::string format() const { return format_; }
+    
 
 private:
     size_t rows_, cols_;
@@ -48,7 +45,7 @@ private:
     std::vector<Value> values_;
     size_t buffer_id_;
     DataType datatype_;
-    DataFormat format_;
+    std::string format_;
 };
 
 // CSR sparse matrix initialization
@@ -63,7 +60,7 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
       values_(values),
       datatype_(TypeToDataType<T>::value()),
       buffer_id_(OpSequence::getInstance().nextBufferId()),
-      format_(DataFormat::CSR) 
+      format_("CSR") 
     {
 
     OpSequence::getInstance().addOp({
@@ -74,7 +71,8 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
             {"rows", std::to_string(rows_)},
             {"cols", std::to_string(cols_)},
             {"nnz", std::to_string(values_.size())},
-            {"datatype", datatype_.toString()}
+            {"datatype", datatype_.toString()},
+            {"format", format_}
         }
     });
 }
@@ -96,9 +94,12 @@ template <typename T>
 size_t SparseMatrix<T>::bytes() const {
     // we should case on the format of matrix here..
     // for now we will assume input is a CSR matrix
-    return (rows_ + 1) * sizeof(size_t) +    // row_offsets
+    if (format_ == "CSR") {
+        return (rows_ + 1) * sizeof(size_t) +    // row_offsets
            values_.size() * sizeof(size_t) +  // col_indices
            values_.size() * datatype_.sizeInBytes(); // values
+    }
+    return 0;
 }
 
 template <typename T>
