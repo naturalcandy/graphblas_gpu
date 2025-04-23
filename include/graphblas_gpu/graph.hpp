@@ -3,9 +3,11 @@
 
 #include <vector>
 #include <cstddef>
+#include <variant>
 #include <graphblas_gpu/op_sequence.hpp>
 #include <graphblas_gpu/data_type.hpp>
 #include <string>
+#include <stdexcept>
 
 namespace graphblas_gpu {
 
@@ -19,33 +21,77 @@ class SparseMatrix {
 public:
     using Value = T;
 
-    // Initialization constructor
+    // CSR
+    struct CSRData {
+        std::vector<size_t> row_offsets;
+        std::vector<size_t> col_indices;
+        std::vector<Value> values;
+    };
+
+    // ELL 
+    struct ELLData {
+        size_t max_nnz_per_row;
+        std::vector<size_t> col_indices;
+        std::vector<Value> values;
+    };
+
+    // SELLC 
+    struct SELLCData {
+        size_t slice_size;
+        std::vector<size_t> slice_ptrs;
+        std::vector<size_t> slice_lengths;
+        std::vector<size_t> col_indices;
+        std::vector<Value> values;
+    };
+
+    using FormatData = std::variant<CSRData, ELLData, SELLCData>;
+    
+
+    // CSR constructor
     SparseMatrix(size_t rows, size_t cols,
                  const std::vector<size_t>& row_offsets,
                  const std::vector<size_t>& col_indices,
                  const std::vector<Value>& values);
     
+    // ELL initialization constructor
+    SparseMatrix(size_t rows, size_t cols,
+        size_t max_nnz_per_row,
+        const std::vector<size_t>& ell_col_indices,
+        const std::vector<Value>& ell_values);
+    
+    // SELLC initialization constructor
+    SparseMatrix(size_t rows, size_t cols,
+        size_t slice_size,
+        const std::vector<size_t>& slice_ptrs,
+        const std::vector<size_t>& slice_lengths,
+        const std::vector<size_t>& sell_col_indices,
+        const std::vector<Value>& sell_values);
+    
     // Staging op constructor  (later on add a data format field as input here)
     SparseMatrix(size_t rows, size_t cols, size_t buffer_id);
 
+    // Basic properties that work with all formats
     size_t numRows() const { return rows_; }
     size_t numCols() const { return cols_; }
-    size_t nnz() const { return values_.size(); }
-
-    size_t bufferId() const;
-    size_t bytes() const;
-    const std::string& dataTypeName() const;
-    DataType dataType() const;
+    size_t bufferId() const { return buffer_id_; }
+    const std::string& dataTypeName() const { return datatype_name_; }
     std::string format() const { return format_; }
-    
+
+
+    // Format Specific Properties
+    size_t nnz() const;
+    size_t bytes() const;
+    DataType dataType() const { return datatype_; }
 
 private:
     size_t rows_, cols_;
-    std::vector<size_t> row_offsets_, col_indices_;
-    std::vector<Value> values_;
     size_t buffer_id_;
     DataType datatype_;
     std::string format_;
+    std::string datatype_name_;
+    FormatData format_data_;
+
+    size_t countNonPadding(const std::vector<size_t>& col_indices) const;
 };
 
 // CSR sparse matrix initialization
@@ -55,14 +101,22 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
                               const std::vector<size_t>& col_indices,
                               const std::vector<Value>& values)
     : rows_(rows), cols_(cols),
-      row_offsets_(row_offsets),
-      col_indices_(col_indices),
-      values_(values),
-      datatype_(TypeToDataType<T>::value()),
       buffer_id_(OpSequence::getInstance().nextBufferId()),
-      format_("CSR") 
+      datatype_(TypeToDataType<T>::value()),
+      datatype_name_(datatype_.toString()),
+      format_("CSR"),
+      format_data_(CSRData{row_offsets, col_indices, values}) 
     {
-
+    if (row_offsets.size() != rows + 1) {
+        throw std::invalid_argument("CSR row_offsets size must be rows+1");
+    }
+    if (col_indices.size() != values.size()) {
+        throw std::invalid_argument("CSR col_indices and values must be same size");
+    }
+    if (row_offsets.back() != col_indices.size()) {
+        throw std::invalid_argument("CSR row_offsets last element must equal nnz");
+    }
+    const auto& csr_data = std::get<CSRData>(format_data_);
     OpSequence::getInstance().addOp({
         Op::Type::AllocGraph,
         "AllocGraph",
@@ -70,12 +124,117 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
         {
             {"rows", std::to_string(rows_)},
             {"cols", std::to_string(cols_)},
-            {"nnz", std::to_string(values_.size())},
-            {"datatype", datatype_.toString()},
+            {"nnz", std::to_string(csr_data.values.size())},
+            {"datatype", datatype_name_},
             {"format", format_}
         }
     });
 }
+
+// ELL sparse matrix initialization
+template <typename T>
+SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
+                            size_t max_nnz_per_row,
+                            const std::vector<size_t>& ell_col_indices,
+                            const std::vector<Value>& ell_values)
+    : rows_(rows), cols_(cols),
+      buffer_id_(OpSequence::getInstance().nextBufferId()),
+      datatype_(TypeToDataType<T>::value()),
+      datatype_name_(datatype_.toString()),
+      format_("ELL"),
+      format_data_(ELLData{max_nnz_per_row, ell_col_indices, ell_values})
+{
+    // Validate inputs
+    if (ell_col_indices.size() != rows * max_nnz_per_row) {
+        throw std::invalid_argument(
+            "ELL column indices array size mismatch. Expected " + 
+            std::to_string(rows * max_nnz_per_row) + " got " + 
+            std::to_string(ell_col_indices.size()));
+    }
+    if (ell_values.size() != rows * max_nnz_per_row) {
+        throw std::invalid_argument(
+            "ELL values array size mismatch. Expected " + 
+            std::to_string(rows * max_nnz_per_row) + " got " + 
+            std::to_string(ell_values.size()));
+    }
+    
+    size_t nnz_count = countNonPadding(ell_col_indices);
+    
+    OpSequence::getInstance().addOp({
+        Op::Type::AllocGraph,
+        "AllocGraph",
+        {buffer_id_},
+        {
+            {"rows", std::to_string(rows_)},
+            {"cols", std::to_string(cols_)},
+            {"nnz", std::to_string(nnz_count)},
+            {"datatype", datatype_name_},
+            {"format", format_},
+            {"max_nnz_per_row", std::to_string(max_nnz_per_row)}
+        }
+    });
+}
+
+
+// SELLC sparse matrix initialization
+template <typename T>
+SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
+                            size_t slice_size,
+                            const std::vector<size_t>& slice_ptrs,
+                            const std::vector<size_t>& slice_lengths,
+                            const std::vector<size_t>& sell_col_indices,
+                            const std::vector<Value>& sell_values)
+    : rows_(rows), cols_(cols),
+      buffer_id_(OpSequence::getInstance().nextBufferId()),
+      datatype_(TypeToDataType<T>::value()),
+      format_("SELLC"),
+      datatype_name_(datatype_.toString()),
+      format_data_(SELLCData{slice_size, slice_ptrs, slice_lengths, sell_col_indices, sell_values})
+{
+    // Validate input sizes
+    size_t num_slices = (rows + slice_size - 1) / slice_size;
+    if (slice_ptrs.size() != num_slices + 1) {
+        throw std::invalid_argument(
+            "SELLC slice_ptrs size mismatch. Expected " + 
+            std::to_string(num_slices + 1) + " got " + 
+            std::to_string(slice_ptrs.size()));
+    }
+    if (slice_lengths.size() != num_slices) {
+        throw std::invalid_argument(
+            "SELLC slice_lengths size mismatch. Expected " + 
+            std::to_string(num_slices) + " got " + 
+            std::to_string(slice_lengths.size()));
+    }
+    if (sell_col_indices.size() != slice_ptrs.back()) {
+        throw std::invalid_argument(
+            "SELLC col_indices size mismatch. Expected " + 
+            std::to_string(slice_ptrs.back()) + " got " + 
+            std::to_string(sell_col_indices.size()));
+    }
+    if (sell_values.size() != slice_ptrs.back()) {
+        throw std::invalid_argument(
+            "SELLC values size mismatch. Expected " + 
+            std::to_string(slice_ptrs.back()) + " got " + 
+            std::to_string(sell_values.size()));
+    }
+    
+    size_t nnz_count = countNonPadding(sell_col_indices);
+    
+    OpSequence::getInstance().addOp({
+        Op::Type::AllocGraph,
+        "AllocGraph",
+        {buffer_id_},
+        {
+            {"rows", std::to_string(rows_)},
+            {"cols", std::to_string(cols_)},
+            {"nnz", std::to_string(nnz_count)},
+            {"datatype", datatype_name_},
+            {"format", format_},
+            {"slice_size", std::to_string(slice_size)}
+        }
+    });
+}
+
 
 // Initialize sparse matrix that are products of intermediate computation.
 template <typename T>
@@ -85,33 +244,53 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols, size_t buffer_id)
       datatype_(TypeToDataType<T>::value()) { }
 
 
+
 template <typename T>
-size_t SparseMatrix<T>::bufferId() const {
-    return buffer_id_;
+size_t SparseMatrix<T>::countNonPadding(const std::vector<size_t>& col_indices) const {
+    size_t count = 0;
+    for (const auto& col : col_indices) {
+        if (col != static_cast<size_t>(-1)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+template <typename T>
+size_t SparseMatrix<T>::nnz() const {
+    if (format_ == "CSR") {
+        const auto& data = std::get<CSRData>(format_data_);
+        return data.values.size();
+    } else {
+        // ELL/SELLC
+        const auto& data = std::get<ELLData>(format_data_);
+        return countNonPadding(data.col_indices);
+    }
 }
 
 template <typename T>
 size_t SparseMatrix<T>::bytes() const {
-    // we should case on the format of matrix here..
-    // for now we will assume input is a CSR matrix
     if (format_ == "CSR") {
-        return (rows_ + 1) * sizeof(size_t) +    // row_offsets
-           values_.size() * sizeof(size_t) +  // col_indices
-           values_.size() * datatype_.sizeInBytes(); // values
+        const auto& data = std::get<CSRData>(format_data_);
+        return (rows_ + 1) * sizeof(size_t) +
+               data.col_indices.size() * sizeof(size_t) +
+               data.values.size() * datatype_.sizeInBytes();
     }
-    return 0;
+    else if (format_ == "ELL") {
+        const auto& data = std::get<ELLData>(format_data_);
+        return data.col_indices.size() * sizeof(size_t) +
+               data.values.size() * datatype_.sizeInBytes();
+    }
+    else if (format_ == "SELLC") {
+        const auto& data = std::get<SELLCData>(format_data_);
+        return data.slice_ptrs.size() * sizeof(size_t) +
+               data.slice_lengths.size() * sizeof(size_t) +
+               data.col_indices.size() * sizeof(size_t) +
+               data.values.size() * datatype_.sizeInBytes();
+    }
+    throw std::runtime_error("Unknown matrix format");
 }
 
-template <typename T>
-const std::string& SparseMatrix<T>::dataTypeName() const {
-    static const std::string name = datatype_.toString();
-    return name;
-}
-
-template <typename T>
-DataType SparseMatrix<T>::dataType() const {
-    return datatype_;
-}
 
 } // namespace graphblas_gpu
 
