@@ -26,6 +26,8 @@ set(GRAPHBLAS_CPU_SRC
 
 set(GRAPHBLAS_GPU_SRC
     kernels/spmv_csr.cu
+    kernels/spmv_ell.cu
+    kernels/spmv_sellc.cu
     kernels/ewise_ops.cu 
 )
 
