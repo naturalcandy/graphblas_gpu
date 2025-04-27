@@ -7,7 +7,7 @@ namespace kernels {
 // Thread -> Row mapping
 template <typename T>
 __device__ void spmv_csr(const size_t* row_offsets,
-                        const size_t* col_indices,
+                        const int* col_indices,
                         const T* values,
                         const T* vector,
                         T* output,

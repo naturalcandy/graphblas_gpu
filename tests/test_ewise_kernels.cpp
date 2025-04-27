@@ -40,8 +40,8 @@ int main() {
     std::cout << "Compiled operations" << std::endl;
     
     // Copy input data to device
-    compiler.copyHostToDevice(h_a.data(), vec_a.bufferId(), vec_a.bytes());
-    compiler.copyHostToDevice(h_b.data(), vec_b.bufferId(), vec_b.bytes());
+    compiler.copyHostToDevice(vec_a);
+    compiler.copyHostToDevice(vec_b);
     
     std::cout << "Copied input data to device" << std::endl;
     

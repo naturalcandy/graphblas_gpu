@@ -2,13 +2,12 @@
 #include <graphblas_gpu/operation.hpp>
 #include <graphblas_gpu/graph.hpp>
 #include <graphblas_gpu/op_compiler.hpp>
+#include <graphblas_gpu/graph_classifier.hpp>
 #include <iostream>
 #include <vector>
 #include <random>
 #include <chrono>
 #include <iomanip>
-#include <cuda_runtime.h>
-#include <cuda.h>
 #include <cstring>
 #include <string>
 #include <algorithm>
@@ -16,12 +15,11 @@
 #include <set>
 #include <functional>
 
-// ===== Matrix Generation Functions =====
 
 // Generate a uniform random sparse matrix
 void generate_uniform_random_csr(size_t num_rows, size_t num_cols, float sparsity, 
                               std::vector<size_t>& row_offsets,
-                              std::vector<size_t>& col_indices,
+                              std::vector<int>& col_indices,
                               std::vector<float>& values,
                               unsigned int seed = 42) {
     std::mt19937 gen(seed);
@@ -69,7 +67,7 @@ void generate_uniform_random_csr(size_t num_rows, size_t num_cols, float sparsit
 // Generate a scale-free sparse matrix
 void generate_powerlaw_csr(size_t num_rows, size_t num_cols, float sparsity,
                           std::vector<size_t>& row_offsets,
-                          std::vector<size_t>& col_indices,
+                          std::vector<int>& col_indices,
                           std::vector<float>& values,
                           unsigned int seed = 42) {
     std::mt19937 gen(seed);
@@ -82,7 +80,6 @@ void generate_powerlaw_csr(size_t num_rows, size_t num_cols, float sparsity,
     values.reserve(estimated_nnz);
     row_offsets.resize(num_rows + 1);
     
-
     std::vector<float> column_weights(num_cols);
     for (size_t i = 0; i < num_cols; ++i) {
         column_weights[i] = 1.0f / std::pow(float(i + 1), 2.1f);
@@ -107,7 +104,8 @@ void generate_powerlaw_csr(size_t num_rows, size_t num_cols, float sparsity,
         if (row_cols.empty() && num_cols > 0) {
             row_cols.insert(gen() % num_cols);
         }
-         for (size_t col : row_cols) {
+        
+        for (size_t col : row_cols) {
             col_indices.push_back(col);
             values.push_back(val_dist(gen));
             nnz++;
@@ -120,7 +118,7 @@ void generate_powerlaw_csr(size_t num_rows, size_t num_cols, float sparsity,
 // Generate a diagonal-heavy sparse matrix 
 void generate_diagonal_heavy_csr(size_t num_rows, size_t num_cols, float sparsity,
                               std::vector<size_t>& row_offsets,
-                              std::vector<size_t>& col_indices,
+                              std::vector<int>& col_indices,
                               std::vector<float>& values,
                               unsigned int seed = 42) {
     std::mt19937 gen(seed);
@@ -195,9 +193,9 @@ void generate_diagonal_heavy_csr(size_t num_rows, size_t num_cols, float sparsit
     }
 }
 
-// Reference sequential implementation 
+// Sequential implementation
 void spmv_ref(const std::vector<size_t>& row_offsets,
-              const std::vector<size_t>& col_indices,
+              const std::vector<int>& col_indices,
               const std::vector<float>& values,
               const std::vector<float>& x,
               std::vector<float>& y) {
@@ -214,32 +212,28 @@ void spmv_ref(const std::vector<size_t>& row_offsets,
     }
 }
 
-std::string matrix_name(const std::string& size, const std::string& pattern, float sparsity) {
-    char sparsity_str[32];
-    snprintf(sparsity_str, sizeof(sparsity_str), "%.1f%%", (1.0f - sparsity) * 100.0f);
-    return size + " " + pattern + " " + sparsity_str;
-}
 
-void csrToDevice(graphblas_gpu::OpCompiler& compiler, 
-                          size_t buffer_id,
-                          const std::vector<size_t>& row_offsets,
-                          const std::vector<size_t>& col_indices,
-                          const std::vector<float>& values) {
-    size_t row_offsets_size = row_offsets.size() * sizeof(size_t);
-    size_t col_indices_size = col_indices.size() * sizeof(size_t);
-    size_t values_size = values.size() * sizeof(float);
+bool verify_results(const std::vector<float>& result, 
+                    const std::vector<float>& reference,
+                    size_t& error_index,
+                    float& max_error,
+                    float tolerance = 1e-5) {
+    bool all_correct = true;
+    max_error = 0.0f;
     
-    size_t total_size = row_offsets_size + col_indices_size + values_size;
-    std::vector<char> buffer(total_size);
+    for (size_t i = 0; i < result.size(); i++) {
+        float error = std::abs(result[i] - reference[i]);
+        if (error > max_error) {
+            max_error = error;
+            error_index = i;
+        }
+        
+        if (error > tolerance) {
+            all_correct = false;
+        }
+    }
     
-    char* ptr = buffer.data();
-    std::memcpy(ptr, row_offsets.data(), row_offsets_size);
-    ptr += row_offsets_size;
-    std::memcpy(ptr, col_indices.data(), col_indices_size);
-    ptr += col_indices_size;
-    std::memcpy(ptr, values.data(), values_size);
-    
-    compiler.copyHostToDevice(buffer.data(), buffer_id, total_size);
+    return all_correct;
 }
 
 struct TestMatrix {
@@ -250,24 +244,76 @@ struct TestMatrix {
     std::string size_name;
     std::function<void(size_t, size_t, float, 
                     std::vector<size_t>&, 
-                    std::vector<size_t>&, 
+                    std::vector<int>&, 
                     std::vector<float>&, 
                     unsigned int)> generator;
     unsigned int seed;
 };
+
+bool test_format(const std::string& format,
+                const graphblas_gpu::SparseMatrix<float>& matrix,
+                const std::vector<float>& x,
+                const std::vector<float>& reference,
+                const std::string& test_info) {
+    using namespace graphblas_gpu;
+    
+    Vector<float> vec_x(x.size(), x);
+    std::vector<float> result(reference.size(), 0.0f);
+    
+    try {
+        // SpMV 
+        Vector<float> gpu_result = Operations<float>::spmv(matrix, vec_x, SemiringType::Arithmetic);
+        
+        // Compile and execute
+        OpCompiler& compiler = OpCompiler::getInstance();
+        compiler.compile();
+        
+        // Copy host data to device
+        compiler.copyHostToDevice(matrix);
+        compiler.copyHostToDevice(vec_x);
+        
+        compiler.execute(1);
+        
+        // Get result
+        compiler.copyDeviceToHost(result.data(), gpu_result.bufferId(), gpu_result.bytes());
+        
+        // Verify results
+        size_t error_index = 0;
+        float max_error = 0.0f;
+        bool passed = verify_results(result, reference, error_index, max_error);
+        
+        if (passed) {
+            std::cout << test_info << " with " << format << ": PASSED" << std::endl;
+        } else {
+            std::cout << test_info << " with " << format << ": FAILED";
+            std::cout << " - Error at row " << error_index << ": " 
+                     << result[error_index] << " vs " << reference[error_index] 
+                     << " (error: " << max_error << ")" << std::endl;
+        }
+        
+        return passed;
+    }
+    catch (const std::exception& e) {
+        std::cerr << test_info << " with " << format 
+                 << ": ERROR - " << e.what() << std::endl;
+        return false;
+    }
+}
 
 int main() {
     using namespace graphblas_gpu;
     
     std::map<std::string, std::function<void(size_t, size_t, float, 
                                           std::vector<size_t>&, 
-                                          std::vector<size_t>&, 
+                                          std::vector<int>&, 
                                           std::vector<float>&, 
                                           unsigned int)>> generators;
                                           
     generators["Uniform"] = generate_uniform_random_csr;
     generators["PowerLaw"] = generate_powerlaw_csr;
     generators["Diagonal"] = generate_diagonal_heavy_csr;
+    
+    // Matrix dimensions to test
     std::vector<std::pair<std::string, std::pair<size_t, size_t>>> sizes = {
         {"Tiny", {16, 16}},
         {"Small", {64, 64}},
@@ -277,8 +323,11 @@ int main() {
         {"Wide", {256, 1024}}
     };
     
-    std::vector<float> sparsities = {0.05f, 0.1f, 0.2f, 0.3f};  
-        std::vector<TestMatrix> test_matrices;
+    // Sparsity levels
+    std::vector<float> sparsities = {0.05f, 0.1f, 0.2f, 0.3f};
+    
+    // Build test matrix list
+    std::vector<TestMatrix> test_matrices;
     unsigned int base_seed = 42;
     
     for (const auto& size_pair : sizes) {
@@ -308,101 +357,104 @@ int main() {
         }
     }
     
-    size_t test_count = 0;
-    size_t passed_count = 0;
+    // Statistics
+    size_t total_tests = 0;
+    size_t csr_passed = 0, csr_total = 0;
+    size_t ell_passed = 0, ell_total = 0;
+    size_t sellc_passed = 0, sellc_total = 0;
     
+    // Run tests
     for (const auto& test : test_matrices) {
-        test_count++;
         OpSequence::getInstance().clear();
         
+        // Generate the test matrix in CSR format
         std::vector<size_t> row_offsets;
-        std::vector<size_t> col_indices;
+        std::vector<int> col_indices;
         std::vector<float> values;
         
         test.generator(test.rows, test.cols, test.sparsity, 
-                     row_offsets, col_indices, values, test.seed);
+                      row_offsets, col_indices, values, test.seed);
         
-        std::vector<float> h_x(test.cols, 1.0f);
-        std::vector<float> h_result(test.rows, 0.0f);
+        std::vector<float> x(test.cols, 1.0f);
         
-        try {
-            // Construct GraphBLAS objects
+        // Reference result
+        std::vector<float> reference(test.rows, 0.0f);
+        spmv_ref(row_offsets, col_indices, values, x, reference);
+        
+        float actual_sparsity = 1.0f - (static_cast<float>(values.size()) / (test.rows * test.cols));
+        char sparsity_str[32];
+        snprintf(sparsity_str, sizeof(sparsity_str), "%.1f%%", actual_sparsity * 100);
+        
+        std::string test_info = test.size_name + " " + 
+                               std::to_string(test.rows) + "x" + std::to_string(test.cols) + 
+                               " " + test.pattern_name + " (NNZ: " + std::to_string(values.size()) + 
+                               ", Sparsity: " + sparsity_str + ")";
+        
+        std::cout << "\nTesting " << test_info << std::endl;
+        total_tests++;
+        
+        // Test CSR format
+        {
+            csr_total++;
             SparseMatrix<float> matrix(test.rows, test.cols, row_offsets, col_indices, values);
-            Vector<float> vec_x(test.cols, h_x);
-            
-            // Schedule the SpMV operation
-            Vector<float> result = Operations<float>::spmv(matrix, vec_x, SemiringType::Arithmetic);
-            
-            // Compile operations
-            OpCompiler& compiler = OpCompiler::getInstance();
-            compiler.compile();
-            
-            csrToDevice(compiler, matrix.bufferId(), row_offsets, col_indices, values);
-            
-            // Copy vector to device
-            compiler.copyHostToDevice(h_x.data(), vec_x.bufferId(), vec_x.bytes());
-            
-            // Execute our schedueled kernel
-            compiler.execute(1);
-            
-            // Copy result back to host
-            compiler.copyDeviceToHost(h_result.data(), result.bufferId(), result.bytes());
-            
-            // Compare with refsol
-            std::vector<float> h_ref(test.rows, 0.0f);
-            spmv_ref(row_offsets, col_indices, values, h_x, h_ref);
-            
-            // Verify
-            bool all_correct = true;
-            size_t error_index = 0;
-            float max_error = 0.0f;
-            
-            for (size_t i = 0; i < test.rows; i++) {
-                float error = std::abs(h_result[i] - h_ref[i]);
-                if (error > max_error) {
-                    max_error = error;
-                    error_index = i;
-                }
-                
-                if (error > 1e-5) {
-                    all_correct = false;
-                }
+            if (test_format("CSR", matrix, x, reference, test_info)) {
+                csr_passed++;
             }
+        }
+        
+        // Test ELL format
+        {
+            ell_total++;
+            std::vector<int> ell_col_indices;
+            std::vector<float> ell_values;
+            size_t max_nnz_per_row;
             
-            float actual_sparsity = 1.0f - (static_cast<float>(values.size()) / (test.rows * test.cols));
+            GraphClassifier::csr_to_ell(row_offsets, col_indices, values, test.rows, 
+                                      ell_col_indices, ell_values, max_nnz_per_row);
             
-            std::string status = all_correct ? "PASSED" : "FAILED";
-            std::string dim_str = std::to_string(test.rows) + "x" + std::to_string(test.cols);
-            std::string sparsity_str = std::to_string(static_cast<int>(actual_sparsity * 100)) + "%";
-            std::cout << test.size_name << " " << dim_str << " " 
-                    << test.pattern_name << " (NNZ: " << values.size() 
-                    << ", Sparsity: " << sparsity_str << "): " << status;
-
-            if (!all_correct) {
-                std::cout << " - Error at row " << error_index 
-                        << ": " << h_result[error_index] 
-                        << " vs " << h_ref[error_index];
+            SparseMatrix<float> matrix(test.rows, test.cols, max_nnz_per_row, 
+                                      ell_col_indices, ell_values);
+            
+            if (test_format("ELL", matrix, x, reference, test_info)) {
+                ell_passed++;
             }
-            std::cout << std::endl;
-
-            if (all_correct) {
-                passed_count++;
-            }
+        }
+        
+        // Test SELLC format
+        {
+            sellc_total++;
+            std::vector<size_t> slice_ptrs;
+            std::vector<size_t> slice_lengths;
+            std::vector<int> sell_col_indices;
+            std::vector<float> sell_values;
+            const size_t slice_size = 2;
             
-        } catch (const std::exception& e) {
-            std::string dim_str = std::to_string(test.rows) + "x" + std::to_string(test.cols);
-            std::string sparsity_str = std::to_string(static_cast<int>((1.0f - test.sparsity) * 100)) + "%";
-
-            std::cout << test.size_name << " " << dim_str << " " 
-                    << test.pattern_name << " (NNZ: " << values.size() 
-                    << ", Sparsity: " << sparsity_str << "): ERROR - " 
-                    << e.what() << std::endl;
+            GraphClassifier::csr_to_sellc(row_offsets, col_indices, values, test.rows, slice_size,
+                                         slice_ptrs, slice_lengths, sell_col_indices, sell_values);
+            
+            SparseMatrix<float> matrix(test.rows, test.cols, slice_size, slice_ptrs, slice_lengths, 
+                                      sell_col_indices, sell_values);
+            
+            if (test_format("SELLC", matrix, x, reference, test_info)) {
+                sellc_passed++;
+            }
         }
     }
     
-    std::cout << "\n-------------------------------------------\n";
-    std::cout << "SUMMARY: " << passed_count << " of " << test_count << " tests passed\n";
-    std::cout << "-------------------------------------------\n";
-        
-    return (passed_count == test_count) ? 0 : 1;
+    // Print summary
+    std::cout << "\n===== Test Summary =====" << std::endl;
+    std::cout << "CSR:    " << csr_passed << "/" << csr_total 
+             << " passed (" << (100.0f * csr_passed / csr_total) << "%)" << std::endl;
+    std::cout << "ELL:    " << ell_passed << "/" << ell_total 
+             << " passed (" << (100.0f * ell_passed / ell_total) << "%)" << std::endl;
+    std::cout << "SELL-C: " << sellc_passed << "/" << sellc_total 
+             << " passed (" << (100.0f * sellc_passed / sellc_total) << "%)" << std::endl;
+    
+    size_t total_passed = csr_passed + ell_passed + sellc_passed;
+    size_t total = csr_total + ell_total + sellc_total;
+    
+    std::cout << "\nOverall: " << total_passed << "/" << total 
+             << " passed (" << (100.0f * total_passed / total) << "%)" << std::endl;
+    
+    return (total_passed == total) ? 0 : 1;
 }

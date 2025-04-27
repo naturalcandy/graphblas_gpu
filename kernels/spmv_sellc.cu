@@ -5,7 +5,7 @@ namespace kernels {
 
 template <typename T>
 __device__ void spmv_sell_c(const size_t* slice_offsets,
-                            const size_t* col_indices,
+                            const int* col_indices,
                             const T* values,
                             size_t num_rows,
                             size_t c,
@@ -27,10 +27,10 @@ __device__ void spmv_sell_c(const size_t* slice_offsets,
     T sum = T(0);
     for (size_t i = 0; i < max_nnz_per_row; ++i) {
         size_t idx = slice_start_idx + i * c;
-        size_t col = col_indices[idx];
+        int col = col_indices[idx];
         T val = values[idx];
 
-        if (val != T(0)) {
+        if (col != -1) {
             sum += val * vector[col];
         }
     }

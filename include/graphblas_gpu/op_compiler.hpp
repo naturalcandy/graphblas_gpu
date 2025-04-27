@@ -37,6 +37,12 @@ public:
     void copyHostToDevice(const void* host_data, size_t buffer_id, size_t size_bytes);
     void copyDeviceToHost(void* host_data, size_t buffer_id, size_t size_bytes);
     
+    template <typename T>
+    void copyHostToDevice(const Vector<T>& vec);
+
+    template <typename T>
+    void copyHostToDevice(const SparseMatrix<T>& matrix);
+    
 private:
     OpCompiler();
     ~OpCompiler();

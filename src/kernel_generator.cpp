@@ -87,26 +87,24 @@ std::string KernelGenerator::generateCode() {
             }
             
             case Op::Type::SpMV: {
-                // TODO: Implement SpMV by casing on storage pattern of input matrix
-                // Get buffer IDs
-                if (op.args.at("format") == "CSR") {
-                    size_t resultId = op.buffer_ids[0];
-                    size_t matrixId = op.buffer_ids[1];
-                    size_t vectorId = op.buffer_ids[2];
-                    
-                    // Get buffer offsets
-                    size_t resultOffset = buffer_id_to_offset_.at(resultId);
-                    size_t matrixOffset = buffer_id_to_offset_.at(matrixId);
-                    size_t vectorOffset = buffer_id_to_offset_.at(vectorId);
-                    
-                    // Get parameters
-                    std::string datatype = op.args.at("datatype");
-                    size_t num_rows = std::stoul(op.args.at("num_rows"));
-                    
-                    // Calculate offsets for CSR format components
+                size_t resultId = op.buffer_ids[0];
+                size_t matrixId = op.buffer_ids[1];
+                size_t vectorId = op.buffer_ids[2];
+                
+                // Get buffer offsets
+                size_t resultOffset = buffer_id_to_offset_.at(resultId);
+                size_t matrixOffset = buffer_id_to_offset_.at(matrixId);
+                size_t vectorOffset = buffer_id_to_offset_.at(vectorId);
+
+                // Get parameters
+                std::string datatype = op.args.at("datatype");
+                size_t num_rows = std::stoul(op.args.at("num_rows"));
+                std::string format = op.args.at("format");
+                
+                if (format == "CSR") {
                     size_t row_offsets_size = (num_rows + 1) * sizeof(size_t);
                     size_t nnz = std::stoul(op.args.at("nnz"));
-                    size_t col_indices_size = nnz * sizeof(size_t);
+                    size_t col_indices_size = nnz * sizeof(int);
 
                     size_t row_offsets_offset = matrixOffset;
                     size_t col_indices_offset = matrixOffset + row_offsets_size;
@@ -116,14 +114,53 @@ std::string KernelGenerator::generateCode() {
                     ss << "        // SpMV operation\n";
                     ss << "        graphblas_gpu::kernels::spmv_csr<" << datatype << ">(\n";
                     ss << "            (size_t*)(buffer + " << row_offsets_offset << "),\n";
-                    ss << "            (size_t*)(buffer + " << col_indices_offset << "),\n";
+                    ss << "            (int*)(buffer + " << col_indices_offset << "),\n";
                     ss << "            (" << datatype << "*)(buffer + " << values_offset << "),\n";
                     ss << "            (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
                     ss << "            (" << datatype << "*)(buffer + " << resultOffset << "),\n";
                     ss << "            " << num_rows << ");\n";
-                    break;
+                } else if (format == "ELL") {
+                    size_t max_nnz = std::stoul(op.args.at("max_nnz_per_row"));
+                    size_t ell_size = num_rows * max_nnz;
+                    
+                    size_t col_idx_offset = matrixOffset;
+                    size_t val_offset = matrixOffset + (ell_size * sizeof(int));
+            
+                    ss << "        // ELL SpMV operation\n";
+                    ss << "        graphblas_gpu::kernels::spmv_ell<" << datatype << ">(\n";
+                    ss << "            (int*)(buffer + " << col_idx_offset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << val_offset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << resultOffset << "),\n";
+                    ss << "            " << num_rows << ",\n";
+                    ss << "            " << max_nnz << ");\n";
                 }
-                // TODO: support diff spmv kernel based on format of input graph..
+                else if (format == "SELLC") {
+                    size_t slice_size = std::stoul(op.args.at("slice_size"));
+                    size_t num_slices = (num_rows + slice_size - 1) / slice_size;
+
+                    size_t sellc_len = op.args.find("sellc_len") != op.args.end() ? 
+                       std::stoul(op.args.at("sellc_len")) : 
+                       std::stoul(op.args.at("nnz"));
+                    
+                    size_t sptr_size = (num_slices + 1) * sizeof(size_t);
+                    size_t slen_size = num_slices * sizeof(size_t);
+                    
+                    size_t sptr_offset = matrixOffset;
+                    size_t slice_lengths_offset = matrixOffset + sptr_size;
+                    size_t col_indices_offset = matrixOffset + sptr_size + slen_size;
+                    size_t values_offset = col_indices_offset + (sellc_len * sizeof(int));
+            
+                    ss << "        // SELL-C SpMV operation\n";
+                    ss << "        graphblas_gpu::kernels::spmv_sell_c<" << datatype << ">(\n";
+                    ss << "            (size_t*)(buffer + " << sptr_offset << "),\n";
+                    ss << "            (int*)(buffer + " << col_indices_offset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << values_offset << "),\n";
+                    ss << "            " << num_rows << ",\n";
+                    ss << "            " << slice_size << ",\n";
+                    ss << "            (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
+                    ss << "            (" << datatype << "*)(buffer + " << resultOffset << "));\n";
+                }
                 break;
             }
             

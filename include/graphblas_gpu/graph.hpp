@@ -24,14 +24,14 @@ public:
     // CSR
     struct CSRData {
         std::vector<size_t> row_offsets;
-        std::vector<size_t> col_indices;
+        std::vector<int> col_indices;
         std::vector<Value> values;
     };
 
     // ELL 
     struct ELLData {
         size_t max_nnz_per_row;
-        std::vector<size_t> col_indices;
+        std::vector<int> col_indices;
         std::vector<Value> values;
     };
 
@@ -40,23 +40,26 @@ public:
         size_t slice_size;
         std::vector<size_t> slice_ptrs;
         std::vector<size_t> slice_lengths;
-        std::vector<size_t> col_indices;
+        std::vector<int> col_indices;
         std::vector<Value> values;
     };
 
     using FormatData = std::variant<CSRData, ELLData, SELLCData>;
+    using CSRFormat = CSRData;
+    using ELLFormat = ELLData;
+    using SELLCFormat = SELLCData;
     
 
     // CSR constructor
     SparseMatrix(size_t rows, size_t cols,
                  const std::vector<size_t>& row_offsets,
-                 const std::vector<size_t>& col_indices,
+                 const std::vector<int>& col_indices,
                  const std::vector<Value>& values);
     
     // ELL initialization constructor
     SparseMatrix(size_t rows, size_t cols,
         size_t max_nnz_per_row,
-        const std::vector<size_t>& ell_col_indices,
+        const std::vector<int>& ell_col_indices,
         const std::vector<Value>& ell_values);
     
     // SELLC initialization constructor
@@ -64,7 +67,7 @@ public:
         size_t slice_size,
         const std::vector<size_t>& slice_ptrs,
         const std::vector<size_t>& slice_lengths,
-        const std::vector<size_t>& sell_col_indices,
+        const std::vector<int>& sell_col_indices,
         const std::vector<Value>& sell_values);
     
     // Staging op constructor  (later on add a data format field as input here)
@@ -83,6 +86,8 @@ public:
     size_t bytes() const;
     DataType dataType() const { return datatype_; }
 
+    const auto& get_format_data() const { return format_data_; }
+
 private:
     size_t rows_, cols_;
     size_t buffer_id_;
@@ -91,14 +96,14 @@ private:
     std::string datatype_name_;
     FormatData format_data_;
 
-    size_t countNonPadding(const std::vector<size_t>& col_indices) const;
+    size_t countNonPadding(const std::vector<int>& col_indices) const;
 };
 
 // CSR sparse matrix initialization
 template <typename T>
 SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
                               const std::vector<size_t>& row_offsets,
-                              const std::vector<size_t>& col_indices,
+                              const std::vector<int>& col_indices,
                               const std::vector<Value>& values)
     : rows_(rows), cols_(cols),
       buffer_id_(OpSequence::getInstance().nextBufferId()),
@@ -135,7 +140,7 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
 template <typename T>
 SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
                             size_t max_nnz_per_row,
-                            const std::vector<size_t>& ell_col_indices,
+                            const std::vector<int>& ell_col_indices,
                             const std::vector<Value>& ell_values)
     : rows_(rows), cols_(cols),
       buffer_id_(OpSequence::getInstance().nextBufferId()),
@@ -182,7 +187,7 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
                             size_t slice_size,
                             const std::vector<size_t>& slice_ptrs,
                             const std::vector<size_t>& slice_lengths,
-                            const std::vector<size_t>& sell_col_indices,
+                            const std::vector<int>& sell_col_indices,
                             const std::vector<Value>& sell_values)
     : rows_(rows), cols_(cols),
       buffer_id_(OpSequence::getInstance().nextBufferId()),
@@ -230,7 +235,8 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
             {"nnz", std::to_string(nnz_count)},
             {"datatype", datatype_name_},
             {"format", format_},
-            {"slice_size", std::to_string(slice_size)}
+            {"slice_size", std::to_string(slice_size)},
+            {"sellc_len", std::to_string(sell_col_indices.size())}
         }
     });
 }
@@ -246,10 +252,10 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols, size_t buffer_id)
 
 
 template <typename T>
-size_t SparseMatrix<T>::countNonPadding(const std::vector<size_t>& col_indices) const {
+size_t SparseMatrix<T>::countNonPadding(const std::vector<int>& col_indices) const {
     size_t count = 0;
     for (const auto& col : col_indices) {
-        if (col != static_cast<size_t>(-1)) {
+        if (col != -1) {
             count++;
         }
     }
@@ -261,11 +267,13 @@ size_t SparseMatrix<T>::nnz() const {
     if (format_ == "CSR") {
         const auto& data = std::get<CSRData>(format_data_);
         return data.values.size();
-    } else {
-        // ELL/SELLC
+    } if (format_ == "ELL") {
         const auto& data = std::get<ELLData>(format_data_);
         return countNonPadding(data.col_indices);
-    }
+    } else {
+        const auto& data = std::get<SELLCData>(format_data_);
+        return countNonPadding(data.col_indices);
+    } 
 }
 
 template <typename T>
@@ -273,19 +281,19 @@ size_t SparseMatrix<T>::bytes() const {
     if (format_ == "CSR") {
         const auto& data = std::get<CSRData>(format_data_);
         return (rows_ + 1) * sizeof(size_t) +
-               data.col_indices.size() * sizeof(size_t) +
+               data.col_indices.size() * sizeof(int) +
                data.values.size() * datatype_.sizeInBytes();
     }
     else if (format_ == "ELL") {
         const auto& data = std::get<ELLData>(format_data_);
-        return data.col_indices.size() * sizeof(size_t) +
+        return data.col_indices.size() * sizeof(int) +
                data.values.size() * datatype_.sizeInBytes();
     }
     else if (format_ == "SELLC") {
         const auto& data = std::get<SELLCData>(format_data_);
         return data.slice_ptrs.size() * sizeof(size_t) +
                data.slice_lengths.size() * sizeof(size_t) +
-               data.col_indices.size() * sizeof(size_t) +
+               data.col_indices.size() * sizeof(int) +
                data.values.size() * datatype_.sizeInBytes();
     }
     throw std::runtime_error("Unknown matrix format");

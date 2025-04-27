@@ -89,18 +89,32 @@ public:
         std::vector<size_t> buffer_ids = {buffer_id, mat.bufferId(), vec.bufferId()};
         if (mask) buffer_ids.push_back(mask->bufferId());
 
+        std::unordered_map<std::string, std::string> args = {
+            {"semiring", std::to_string(static_cast<int>(semiring))},
+            {"datatype", vec.dataType().toString()},
+            {"mask", mask ? "true" : "false"},
+            {"format", mat.format()},
+            {"num_rows", std::to_string(mat.numRows())},
+            {"nnz", std::to_string(mat.nnz())}
+        };
+
+        const auto& format_data = mat.get_format_data();
+
+        if (mat.format() == "ELL") {
+            const auto& ell_data = std::get<typename SparseMatrix<T>::ELLFormat>(format_data);
+            args["max_nnz_per_row"] = std::to_string(ell_data.max_nnz_per_row);
+        } 
+        else if (mat.format() == "SELLC") {
+            const auto& sellc_data = std::get<typename SparseMatrix<T>::SELLCFormat>(format_data);
+            args["slice_size"] = std::to_string(sellc_data.slice_size);
+            args["sellc_len"]  = std::to_string(sellc_data.col_indices.size());
+        }
+
         OpSequence::getInstance().addOp({
             Op::Type::SpMV,
             "SpMV",
             buffer_ids,
-            {
-                {"semiring", std::to_string(static_cast<int>(semiring))},
-                {"datatype", vec.dataType().toString()},
-                {"mask", mask ? "true" : "false"},
-                {"format", mat.format()},
-                {"num_rows", std::to_string(mat.numRows())},
-                {"nnz", std::to_string(mat.nnz())}
-            }
+            args
         });
 
         return Vector<T>(mat.numRows(), buffer_id);

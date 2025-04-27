@@ -7,7 +7,7 @@
 int main() {
     graphblas_gpu::OpSequence::getInstance().clear();
     
-    std::cout << "===== Testing Buffer Allocation =====" << std::endl;
+    std::cout << "===== Testing Buffer Allocation & Op Scheduling =====" << std::endl;
     
     const size_t size = 1024;
     std::vector<float> h_a(size, 1.0f);

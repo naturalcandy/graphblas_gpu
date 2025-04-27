@@ -2,7 +2,7 @@
 #include <graphblas_gpu/kernel_generator.hpp>
 #include <cuda_runtime.h>
 #include <cuda.h>
-#include <nvrtc.h>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -108,6 +108,7 @@ void OpCompiler::allocateBuffers() {
                 size_t cols = std::stoul(op.args.at("cols"));
                 size_t nnz = std::stoul(op.args.at("nnz"));
                 std::string datatype_str = op.args.at("datatype");
+                std::string format = op.args.at("format");
                 
                 // Parse the datatype string to get a DataType object
                 DataType datatype;
@@ -117,12 +118,37 @@ void OpCompiler::allocateBuffers() {
                     std::cerr << "  WARNING: " << e.what() << " - Defaulting to Float" << std::endl;
                     datatype = DataType(DataTypeEnum::Float);
                 }
-
-                size_t buffer_size =
-                    (rows + 1) * sizeof(size_t) +  // row_offsets
-                    nnz * sizeof(size_t) +         // col_indices
-                    nnz * datatype.sizeInBytes();  // values
-
+                
+                size_t buffer_size = 0;
+                
+                // Calculate buffer size based on the format
+                if (format == "CSR") {
+                    buffer_size = (rows + 1) * sizeof(size_t) +  // row_offsets
+                                  nnz * sizeof(int) +            // col_indices
+                                  nnz * datatype.sizeInBytes();  // values
+                } 
+                else if (format == "ELL") {
+                    size_t max_nnz_per_row = std::stoul(op.args.at("max_nnz_per_row"));
+                    size_t ell_size = rows * max_nnz_per_row;
+                    buffer_size = ell_size * sizeof(int) +              // col_indices
+                                  ell_size * datatype.sizeInBytes();    // values
+                }
+                else if (format == "SELLC") {
+                    size_t slice_size = std::stoul(op.args.at("slice_size"));
+                    size_t num_slices = (rows + slice_size - 1) / slice_size;
+                    size_t sellc_len = op.args.find("sellc_len") != op.args.end() ? 
+                                      std::stoul(op.args.at("sellc_len")) : 
+                                      nnz;
+                    
+                    buffer_size = (num_slices + 1) * sizeof(size_t) +  // slice_ptrs
+                                  num_slices * sizeof(size_t) +        // slice_lengths
+                                  sellc_len * sizeof(int) +            // col_indices
+                                  sellc_len * datatype.sizeInBytes();  // values
+                }
+                else {
+                    std::cerr << "WARNING: Unknown matrix format." << std::endl;
+                }
+            
                 buffer_info_map[buffer_id] = {
                     .rows = rows,
                     .cols = cols,
@@ -527,5 +553,95 @@ void OpCompiler::copyDeviceToHost(void* host_data, size_t buffer_id, size_t size
     void* device_ptr = static_cast<char*>(device_memory_) + it->second;
     cudaMemcpy(host_data, device_ptr, size_bytes, cudaMemcpyDeviceToHost);
 }
+
+template <typename T>
+void OpCompiler::copyHostToDevice(const Vector<T>& vec) {
+    if (!is_compiled_) {
+        std::cerr << "Error: Call compile() before copying data" << std::endl;
+        return;
+    }
+    
+    copyHostToDevice(vec.data(), vec.bufferId(), vec.size() * sizeof(T));
+}
+
+template <typename T>
+void OpCompiler::copyHostToDevice(const SparseMatrix<T>& matrix) {
+    if (!is_compiled_) {
+        std::cerr << "Error: Call compile() before copying data" << std::endl;
+        return;
+    }
+    
+    const std::string& format = matrix.format();
+    const auto& format_data = matrix.get_format_data();
+    
+    if (format == "CSR") {
+        const auto& csr_data = std::get<typename SparseMatrix<T>::CSRData>(format_data);
+        
+        size_t row_offsets_size = csr_data.row_offsets.size() * sizeof(size_t);
+        size_t col_indices_size = csr_data.col_indices.size() * sizeof(int);
+        size_t values_size = csr_data.values.size() * sizeof(T);
+        
+        size_t total_size = row_offsets_size + col_indices_size + values_size;
+        std::vector<char> buffer(total_size);
+        
+        char* ptr = buffer.data();
+        std::memcpy(ptr, csr_data.row_offsets.data(), row_offsets_size);
+        ptr += row_offsets_size;
+        std::memcpy(ptr, csr_data.col_indices.data(), col_indices_size);
+        ptr += col_indices_size;
+        std::memcpy(ptr, csr_data.values.data(), values_size);
+        
+        copyHostToDevice(buffer.data(), matrix.bufferId(), total_size);
+    }
+    else if (format == "ELL") {
+        const auto& ell_data = std::get<typename SparseMatrix<T>::ELLData>(format_data);
+        
+        size_t col_indices_size = ell_data.col_indices.size() * sizeof(int);
+        size_t values_size = ell_data.values.size() * sizeof(T);
+        
+        size_t total_size = col_indices_size + values_size;
+        std::vector<char> buffer(total_size);
+        
+        char* ptr = buffer.data();
+        std::memcpy(ptr, ell_data.col_indices.data(), col_indices_size);
+        ptr += col_indices_size;
+        std::memcpy(ptr, ell_data.values.data(), values_size);
+        
+        copyHostToDevice(buffer.data(), matrix.bufferId(), total_size);
+    }
+    else if (format == "SELLC") {
+        const auto& sellc_data = std::get<typename SparseMatrix<T>::SELLCData>(format_data);
+        
+        size_t slice_ptrs_size = sellc_data.slice_ptrs.size() * sizeof(size_t);
+        size_t slice_lengths_size = sellc_data.slice_lengths.size() * sizeof(size_t);
+        size_t col_indices_size = sellc_data.col_indices.size() * sizeof(int);
+        size_t values_size = sellc_data.values.size() * sizeof(T);
+        
+        size_t total_size = slice_ptrs_size + slice_lengths_size + col_indices_size + values_size;
+        std::vector<char> buffer(total_size);
+        
+        char* ptr = buffer.data();
+        std::memcpy(ptr, sellc_data.slice_ptrs.data(), slice_ptrs_size);
+        ptr += slice_ptrs_size;
+        std::memcpy(ptr, sellc_data.slice_lengths.data(), slice_lengths_size);
+        ptr += slice_lengths_size;
+        std::memcpy(ptr, sellc_data.col_indices.data(), col_indices_size);
+        ptr += col_indices_size;
+        std::memcpy(ptr, sellc_data.values.data(), values_size);
+        
+        copyHostToDevice(buffer.data(), matrix.bufferId(), total_size);
+    }
+    else {
+        std::cerr << "Error: Unsupported matrix format: " << format << std::endl;
+    }
+}
+
+template void OpCompiler::copyHostToDevice<float>(const Vector<float>&);
+template void OpCompiler::copyHostToDevice<double>(const Vector<double>&);
+template void OpCompiler::copyHostToDevice<int>(const Vector<int>&);
+
+template void OpCompiler::copyHostToDevice<float>(const SparseMatrix<float>&);
+template void OpCompiler::copyHostToDevice<double>(const SparseMatrix<double>&);
+template void OpCompiler::copyHostToDevice<int>(const SparseMatrix<int>&);
 
 } // namespace graphblas_gpu
