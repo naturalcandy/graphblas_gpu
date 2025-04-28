@@ -1,11 +1,13 @@
 #include <graphblas_gpu/kernels/spmv_csr.hpp>
+#include <cuda_runtime.h>
+#include <cuda.h>
 
 namespace graphblas_gpu{
 namespace kernels {
 
 // naive csr spmv implementation
 template <typename T>
-__device__ void spmv_csr(const size_t* row_offsets,
+__global__ void spmv_csr_kernel(const size_t* row_offsets,
                         const int* col_indices,
                         const T* values,
                         const T* vector,
@@ -22,5 +24,22 @@ __device__ void spmv_csr(const size_t* row_offsets,
     output[row] = sum;
 }
 
+template <typename T>
+void spmv_csr(const size_t* row_offsets,
+    const int* col_indices,
+    const T* values,
+    const T* vector,
+    T* output,
+    size_t num_rows){
+        spmv_csr_kernel<T><<<(num_rows + 255) / 256, 256>>>(
+            row_offsets,
+            col_indices,
+            values,
+            vector,
+            output,
+            num_rows);
+        cudaDeviceSynchronize();
+
+    }
 } // namespace kernels
 } // namespace graphblas_gpu

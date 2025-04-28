@@ -1,11 +1,13 @@
 #include <graphblas_gpu/kernels/spmv_sellc.hpp>
+#include <cuda_runtime.h>
+#include <cuda.h>
 
 namespace graphblas_gpu{
 namespace kernels {
 
 template <typename T>
-__device__ void spmv_sell_c(const size_t* slice_offsets,
-                            const int* col_indices,
+__global__ void spmv_sell_c_kernel(const size_t* slice_offsets,
+                            const size_t* col_indices,
                             const T* values,
                             size_t num_rows,
                             size_t c,
@@ -38,5 +40,25 @@ __device__ void spmv_sell_c(const size_t* slice_offsets,
     output[global_row] = sum;
 }
 
+template <typename T>
+void spmv_sell_c(const size_t* slice_offsets,
+    const size_t* col_indices,
+    const T* values,
+    size_t num_rows,
+    size_t c,
+    const T* vector,
+    T* output
+   ){
+    spmv_sell_c_kernel<T><<<(num_rows + 255) / 256, 256>>>(
+        slice_offsets,
+        col_indices,
+        values,
+        num_rows,
+        c,
+        vector,
+        output);
+    cudaDeviceSynchronize();
+
+} 
 } // namespace kernels
 } // namespace graphblas_gpu

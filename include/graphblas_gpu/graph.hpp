@@ -88,6 +88,7 @@ public:
 
     const auto& get_format_data() const { return format_data_; }
 
+
 private:
     size_t rows_, cols_;
     size_t buffer_id_;
@@ -97,6 +98,7 @@ private:
     FormatData format_data_;
 
     size_t countNonPadding(const std::vector<int>& col_indices) const;
+    std::string classifyOptimalFormat();
 };
 
 // CSR sparse matrix initialization
@@ -299,6 +301,52 @@ size_t SparseMatrix<T>::bytes() const {
     throw std::runtime_error("Unknown matrix format");
 }
 
+template <typename T>
+std::string SparseMatrix<T>::classifyOptimalFormat() {
+    if (format_ != "CSR") {
+        return format_; // Only analyze CSR matrices
+    }
+
+    const auto& csr_data = std::get<CSRData>(format_data_);
+    const std::vector<size_t>& row_offsets = csr_data.row_offsets;
+    size_t n_rows = this->numRows();
+
+    if (n_rows == 0) {
+        return "CSR"; // Empty matrix, stay CSR
+    }
+
+    double sum = 0.0;
+    for (size_t i = 0; i < n_rows; ++i) {
+        sum += static_cast<double>(row_offsets[i+1] - row_offsets[i]);
+    }
+    double mean_nnz = sum / n_rows;
+
+    double variance = 0.0;
+    size_t max_row_nnz = 0;
+    size_t empty_rows = 0;
+    for (size_t i = 0; i < n_rows; ++i) {
+        size_t row_nnz = row_offsets[i+1] - row_offsets[i];
+        variance += (static_cast<double>(row_nnz) - mean_nnz) * (static_cast<double>(row_nnz) - mean_nnz);
+        max_row_nnz = std::max(max_row_nnz, row_nnz);
+        if (row_nnz == 0) {
+            empty_rows++;
+        }
+    }
+    variance /= n_rows;
+    double normalized_variance = variance / mean_nnz;
+
+    if (normalized_variance < 0.2) {
+        if (max_row_nnz > 2 * mean_nnz || empty_rows > 0) {
+            return "SELL-C"; // Small variance, but some heavy or empty rows
+        } else {
+            return "ELL"; // Uniform
+        }
+    } else if (normalized_variance <= 1.0) {
+        return "SELL-C"; // Medium vvariance
+    } else {
+        return "CSR"; // High variance
+    }
+}
 
 } // namespace graphblas_gpu
 

@@ -9,6 +9,6 @@
 #include <graphblas_gpu/kernels/spmv_sellc.hpp>
 
 #include "ewise_ops.cu"     
-#include "spmv_csr.cu"   
+#include "spmv_csr.cu"
 #include "spmv_ell.cu"
-#include "spmv_sellc.cu"   
+#include "spmv_sellc.cu"

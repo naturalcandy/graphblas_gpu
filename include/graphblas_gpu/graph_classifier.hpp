@@ -66,6 +66,21 @@ public:
         std::vector<size_t>& row_offsets,
         std::vector<int>& col_indices,
         std::vector<T>& values);
+    
+    template <typename T>
+    void dense_to_csr(const T* dense, size_t num_rows, size_t num_cols,
+                      size_t*& row_offsets, size_t*& col_indices, T*& values);
+                    
+    template <typename T>
+    void dense_to_ell(const T* dense, size_t num_rows, size_t num_cols,
+                  size_t*& ell_col_indices, T*& ell_values, size_t& max_cols_per_row);
+
+    template <typename T>
+    void dense_to_sell_c(const T* dense, size_t num_rows, size_t num_cols, size_t slice_height,
+                    size_t*& sell_col_indices, T*& sell_values,
+                    size_t*& slice_ptrs, size_t*& slice_lengths);
+
+    
 
 private:
     static size_t countNonPadding(const std::vector<int>& col_indices);
@@ -295,6 +310,140 @@ void GraphClassifier::sellc_to_csr(
         }
     }
 }
+
+template <typename T>
+void GraphClassifier::dense_to_csr(const T* dense, size_t num_rows, size_t num_cols,
+                  size_t*& row_offsets, size_t*& col_indices, T*& values) {
+    // First pass: count non-zeros
+    size_t nnz = 0;
+    for (size_t i = 0; i < num_rows * num_cols; ++i) {
+        if (dense[i] != 0.0f) ++nnz;
+    }
+
+    row_offsets = new size_t[num_rows + 1];
+    col_indices = new size_t[nnz];
+    values = new float[nnz];
+
+    size_t index = 0;
+    row_offsets[0] = 0;
+    for (size_t row = 0; row < num_rows; ++row) {
+        for (size_t col = 0; col < num_cols; ++col) {
+            float val = dense[row * num_cols + col];
+            if (val != 0.0f) {
+                col_indices[index] = col;
+                values[index] = val;
+                ++index;
+            }
+        }
+        row_offsets[row + 1] = index;
+    }
+}
+
+template <typename T>
+void GraphClassifier::dense_to_ell(const T* dense, size_t num_rows, size_t num_cols,
+    size_t*& ell_col_indices, T*& ell_values, size_t& max_cols_per_row) {
+    // Determine max nnz per row
+    max_cols_per_row = 0;
+    for (size_t row = 0; row < num_rows; ++row) {
+        int count = 0;
+        for (size_t col = 0; col < num_cols; ++col) {
+            if (dense[row * num_cols + col] != 0.0f) ++count;
+        }
+        if (count > max_cols_per_row) max_cols_per_row = count;
+    }
+
+    ell_col_indices = new size_t[num_rows * max_cols_per_row];
+    ell_values = new float[num_rows * max_cols_per_row];
+
+    for (size_t row = 0; row < num_rows; ++row) {
+        int nz = 0;
+        for (size_t col = 0; col < num_cols; ++col) {
+            float val = dense[row * num_cols + col];
+            if (val != 0.0f) {
+                ell_col_indices[row + nz * num_rows] = col;
+                ell_values[row + nz * num_rows] = val;
+                ++nz;
+            }
+        }
+        // Pad remaining
+        for (int k = nz; k < max_cols_per_row; ++k) {
+            ell_col_indices[row + k * num_rows] = -1;
+            ell_values[row + k * num_rows] = 0.0f;
+        }
+    }
+}
+
+template <typename T>
+void GraphClassifier::dense_to_sell_c(const T* dense, size_t num_rows, size_t num_cols, size_t slice_height,
+    size_t*& sell_col_indices, T*& sell_values,
+                    size_t*& slice_ptrs, size_t*& slice_lengths) {
+    int num_slices = (num_rows + slice_height - 1) / slice_height;
+
+    slice_ptrs = new size_t[num_slices + 1];
+    slice_lengths = new size_t[num_slices];
+
+    // First pass: find max nnz per row in each slice
+    int total_nnz_entries = 0;
+    for (int s = 0; s < num_slices; ++s) {
+        int max_cols = 0;
+        for (int i = 0; i < slice_height; ++i) {
+            int row = s * slice_height + i;
+            if (row >= (int)num_rows) break;
+            int count = 0;
+            for (size_t col = 0; col < num_cols; ++col) {
+                if (dense[row * num_cols + col] != 0.0f) ++count;
+            }
+            if (count > max_cols) max_cols = count;
+        }
+        slice_lengths[s] = max_cols;
+        total_nnz_entries += max_cols * slice_height;
+    }
+
+    sell_col_indices = new size_t[total_nnz_entries];
+    sell_values = new float[total_nnz_entries];
+
+    int offset = 0;
+    for (int s = 0; s < num_slices; ++s) {
+        slice_ptrs[s] = offset;
+        int max_cols = slice_lengths[s];
+
+        for (int j = 0; j < max_cols; ++j) {
+            for (int i = 0; i < slice_height; ++i) {
+                int row = s * slice_height + i;
+                int idx = offset + j * slice_height + i;
+                if (row >= (int)num_rows) {
+                    sell_col_indices[idx] = -1;
+                    sell_values[idx] = 0.0f;
+                    continue;
+                }
+
+                // Find the j-th non-zero
+                int found = 0;
+                for (size_t col = 0; col < num_cols; ++col) {
+                    float val = dense[row * num_cols + col];
+                    if (val != 0.0f) {
+                        if (found == j) {
+                            sell_col_indices[idx] = col;
+                            sell_values[idx] = val;
+                            break;
+                        }
+                        ++found;
+                    }
+                }
+
+                if (found <= j) {
+                    sell_col_indices[idx] = -1;
+                    sell_values[idx] = 0.0f;
+                }
+            }
+        }
+
+        offset += max_cols * slice_height;
+    }
+
+    slice_ptrs[num_slices] = offset;
+}
+
 
 } // namespace graphblas_gpu
 
