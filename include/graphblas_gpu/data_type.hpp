@@ -48,7 +48,6 @@ public:
         }
     }
     
-    // Equality operator
     bool operator==(const DataType& other) const {
         return type_ == other.type_;
     }
@@ -99,7 +98,6 @@ inline DataType dataTypeFromString(const std::string& name) {
     if (name == "int64" || name == "long") return DataType(DataTypeEnum::Int64);
     if (name == "bool") return DataType(DataTypeEnum::Bool);
     
-    // Float as default
     return DataType(DataTypeEnum::Float);
 }
 

@@ -32,12 +32,29 @@ public:
         });
     }
 
-    // Staging op constructor
+    // Staged op constructor
     Vector(size_t size, size_t buffer_id)
         : size_(size),
           buffer_id_(buffer_id),
           datatype_(TypeToDataType<T>::value()) {
-        // Note: Intentionally empty. NO AllocVector op here.
+    }
+
+    // Empty vector constructor
+    Vector(size_t size)
+        : size_(size),
+        values_(),  
+        datatype_(TypeToDataType<T>::value()),
+        buffer_id_(OpSequence::getInstance().nextBufferId()) {
+
+        OpSequence::getInstance().addOp({
+            Op::Type::AllocVector,
+            "AllocVector",
+            {buffer_id_},
+            {
+                {"size", std::to_string(size_)},
+                {"datatype", datatype_.toString()}
+            }
+        });
     }
 
     size_t bufferId() const {
@@ -65,9 +82,26 @@ public:
         return values_.data();
     }
 
+    static void copy(const Vector<T>& src, Vector<T>& dst) {
+        if (src.size() != dst.size()) {
+            throw std::invalid_argument("Source and destination vectors must have the same size");
+        }
+    
+        OpSequence::getInstance().addOp({
+            Op::Type::Copy,
+            "Copy",
+            {dst.bufferId(), src.bufferId()},
+            {
+                {"datatype", src.dataType().toString()},
+                {"size", std::to_string(src.size())}
+            }
+        });
+    }
+    
 private:
     size_t size_;
-    std::vector<Value> values_; // can be empty if vector is output of staged op
+    // Can be empty if vector is output of staged op
+    std::vector<Value> values_; 
     size_t buffer_id_;
     DataType datatype_;
 };

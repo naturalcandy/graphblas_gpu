@@ -7,8 +7,6 @@
 int main() {
     // Clear any previous operations
     graphblas_gpu::OpSequence::getInstance().clear();
-    
-    std::cout << "===== Testing Full Kernel Execution =====" << std::endl;
     // Create test vectors 
     const size_t size = 1024;
     std::vector<float> h_a(size, 1.0f);
@@ -46,7 +44,7 @@ int main() {
     std::cout << "Copied input data to device" << std::endl;
     
     // Execute the generated kernel
-    compiler.execute(1);  // Run for 1 iteration
+    compiler.execute(1);  
     
     std::cout << "Executed kernel" << std::endl;
     

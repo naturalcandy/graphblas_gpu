@@ -5,10 +5,9 @@ namespace graphblas_gpu {
 
 enum class SemiringType {
     Arithmetic,     // Standard arithmetic (+, *)
-    LogicalOrAnd,   // Logical OR and AND semiring
-    MinPlus         // Min-Plus semiring for shortest path
+    LogicalOrAnd   // Logical OR and AND semiring
     
-    // Probs should add more...
+    // Enough for now...
 };
 
 } // namespace graphblas_gpu

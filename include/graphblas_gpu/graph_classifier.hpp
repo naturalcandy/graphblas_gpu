@@ -18,6 +18,7 @@ public:
         size_t rows, size_t cols); */
     
     // maybe we could implement these conversion functions to be on device side 
+    // if we have time... 
     
     // CSR to ELL
     template <typename T>
@@ -66,6 +67,18 @@ public:
         std::vector<size_t>& row_offsets,
         std::vector<int>& col_indices,
         std::vector<T>& values);
+    
+    // CSR -> CSR (transpose)
+    template <typename T>
+    static void csr_transpose(
+        size_t rows, size_t cols,
+        const std::vector<size_t>& row_offsets,
+        const std::vector<int>&    col_indices,
+        const std::vector<T>&      values,
+        std::vector<size_t>&       row_offsets_T,
+        std::vector<int>&          col_indices_T,
+        std::vector<T>&            values_T);
+
 
 private:
     static size_t countNonPadding(const std::vector<int>& col_indices);
@@ -93,24 +106,20 @@ void GraphClassifier::csr_to_ell(
     std::vector<T>& ell_values,
     size_t& max_nnz_per_row) {
 
-    // Find maximum non-zeros per row
     max_nnz_per_row = 0;
     for (size_t i = 0; i < num_rows; i++) {
         size_t count = row_offsets[i + 1] - row_offsets[i];
         max_nnz_per_row = std::max(max_nnz_per_row, count);
     }
 
-    // Resize output vectors
     ell_col_indices.resize(num_rows * max_nnz_per_row);
     ell_values.resize(num_rows * max_nnz_per_row);
 
-    // Convert CSR to ELL
     for (size_t i = 0; i < num_rows; i++) {
         size_t row_start = row_offsets[i];
         size_t row_end = row_offsets[i + 1];
         size_t k = 0;
 
-        // Copy actual elements
         for (size_t j = row_start; j < row_end; j++, k++) {
             ell_col_indices[i * max_nnz_per_row + k] = col_indices[j];
             ell_values[i * max_nnz_per_row + k] = values[j];
@@ -118,7 +127,7 @@ void GraphClassifier::csr_to_ell(
 
         // Pad with -1 for columns and 0 for values
         for (; k < max_nnz_per_row; k++) {
-            ell_col_indices[i * max_nnz_per_row + k] = -1;  // Changed from static_cast<size_t>(-1)
+            ell_col_indices[i * max_nnz_per_row + k] = -1;  
             ell_values[i * max_nnz_per_row + k] = T(0);
         }
     }
@@ -140,7 +149,7 @@ void GraphClassifier::ell_to_csr(
     for (size_t i = 0; i < num_rows; i++) {
         for (size_t j = 0; j < max_nnz_per_row; j++) {
             size_t idx = i * max_nnz_per_row + j;
-            if (idx < ell_col_indices.size() && ell_col_indices[idx] != -1) {  // Changed from static_cast<size_t>(-1)
+            if (idx < ell_col_indices.size() && ell_col_indices[idx] != -1) {  
                 nnz++;
             }
         }
@@ -158,7 +167,7 @@ void GraphClassifier::ell_to_csr(
     for (size_t i = 0; i < num_rows; i++) {
         for (size_t j = 0; j < max_nnz_per_row; j++) {
             size_t idx = i * max_nnz_per_row + j;
-            if (idx < ell_col_indices.size() && ell_col_indices[idx] != -1) {  // Changed from static_cast<size_t>(-1)
+            if (idx < ell_col_indices.size() && ell_col_indices[idx] != -1) {  
                 col_indices[nnz_counter] = ell_col_indices[idx];
                 values[nnz_counter] = ell_values[idx];
                 nnz_counter++;
@@ -181,17 +190,15 @@ void GraphClassifier::csr_to_sellc(
     std::vector<int>&          sell_col_indices,    // length = total_vals
     std::vector<T>&            sell_values)         // length = total_vals
 {
-    /* ---------- 1. basic geometry ---------- */
     const size_t num_slices = (num_rows + slice_size - 1) / slice_size;
     slice_ptrs.resize   (num_slices + 1);
     slice_lengths.resize(num_slices);
 
-    /* ---------- 2. determine max nnz/row in every slice ---------- */
     size_t total_vals = 0;
     for (size_t s = 0; s < num_slices; ++s)
     {
         size_t max_nnz = 0;
-        for (size_t r = 0; r < slice_size; ++r)            // rows *inside* slice
+        for (size_t r = 0; r < slice_size; ++r)            
         {
             const size_t row = s * slice_size + r;
             if (row >= num_rows) break;
@@ -199,26 +206,24 @@ void GraphClassifier::csr_to_sellc(
             const size_t row_nnz = row_offsets[row + 1] - row_offsets[row];
             max_nnz = std::max(max_nnz, row_nnz);
         }
-        slice_lengths[s] = max_nnz;            // k_max for this slice
+        slice_lengths[s] = max_nnz;            
         total_vals      += max_nnz * slice_size;
     }
 
-    /* ---------- 3. prefix sum for slice_ptrs ---------- */
     slice_ptrs[0] = 0;
     for (size_t s = 1; s <= num_slices; ++s)
         slice_ptrs[s] = slice_ptrs[s - 1] + slice_lengths[s - 1] * slice_size;
 
-    /* ---------- 4. allocate output buffers ---------- */
     sell_col_indices.assign(total_vals, -1);
     sell_values      .assign(total_vals, T(0));
 
-    /* ---------- 5. fill buffers column-major inside each slice ---------- */
     for (size_t s = 0; s < num_slices; ++s)
     {
         const size_t slice_offset = slice_ptrs[s];
         const size_t k_max        = slice_lengths[s];
 
-        for (size_t r = 0; r < slice_size; ++r)            // local row
+        // local row
+        for (size_t r = 0; r < slice_size; ++r)            
         {
             const size_t global_row = s * slice_size + r;
             if (global_row >= num_rows) break;
@@ -227,14 +232,13 @@ void GraphClassifier::csr_to_sellc(
             const size_t row_end   = row_offsets[global_row + 1];
             const size_t row_nnz   = row_end - row_start;
 
-            /* copy real nnz first, then leave padding at -1 / 0 */
             for (size_t k = 0; k < row_nnz; ++k)
             {
-                const size_t dst = slice_offset + k * slice_size + r; // k·C + r
+                const size_t dst = slice_offset + k * slice_size + r; 
                 sell_col_indices[dst] = col_indices[row_start + k];
                 sell_values      [dst] = values     [row_start + k];
             }
-            /* remaining k positions already contain -1 / 0 from assign() */
+            
         }
     }
 }
@@ -258,17 +262,15 @@ void GraphClassifier::sellc_to_csr(
     size_t nnz = 0;
     
     for (const auto& col : sell_col_indices) {
-        if (col != -1) {  // Changed from static_cast<size_t>(-1)
+        if (col != -1) {  
             nnz++;
         }
     }
     
-    // Resize CSR arrays
     row_offsets.resize(num_rows + 1);
     col_indices.resize(nnz);
     values.resize(nnz);
     
-    // Convert SELL-C to CSR
     size_t nnz_counter = 0;
     row_offsets[0] = 0;
     
@@ -283,7 +285,7 @@ void GraphClassifier::sellc_to_csr(
             size_t row_nnz = 0;
             for (size_t j = 0; j < max_cols; j++) {
                 size_t idx = slice_offset + j * slice_size + i;
-                if (sell_col_indices[idx] != -1) {  // Changed from static_cast<size_t>(-1)
+                if (sell_col_indices[idx] != -1) {  
                     col_indices[nnz_counter] = sell_col_indices[idx];
                     values[nnz_counter] = sell_values[idx];
                     nnz_counter++;
@@ -292,6 +294,43 @@ void GraphClassifier::sellc_to_csr(
             }
             
             row_offsets[row + 1] = row_offsets[row] + row_nnz;
+        }
+    }
+}
+
+
+template <typename T>
+void GraphClassifier::csr_transpose(
+        size_t rows, size_t cols,
+        const std::vector<size_t>& row_offsets,
+        const std::vector<int>&    col_indices,
+        const std::vector<T>&      values,
+        std::vector<size_t>&       row_offsets_T,
+        std::vector<int>&          col_indices_T,
+        std::vector<T>&            values_T)
+{
+    const size_t nnz = col_indices.size();
+    row_offsets_T.resize(cols + 1, 0);
+
+    for (int c : col_indices) {
+        if (c < 0 || static_cast<size_t>(c) >= cols)
+            throw std::out_of_range("csr_transpose: column index out of range");
+        ++row_offsets_T[c + 1];
+    }
+
+    for (size_t i = 0; i < cols; ++i)
+        row_offsets_T[i + 1] += row_offsets_T[i];
+
+    col_indices_T.resize(nnz);
+    values_T.resize(nnz);
+    std::vector<size_t> cursor(row_offsets_T.begin(), row_offsets_T.end() - 1);
+
+    for (size_t r = 0; r < rows; ++r) {
+        for (size_t p = row_offsets[r]; p < row_offsets[r + 1]; ++p) {
+            int    c   = col_indices[p];
+            size_t dst = cursor[c]++;
+            col_indices_T[dst] = static_cast<int>(r);  
+            values_T     [dst] = values[p];
         }
     }
 }

@@ -8,3 +8,4 @@
 #include <graphblas_gpu/op_sequence.hpp>
 #include <graphblas_gpu/op_compiler.hpp>
 #include <graphblas_gpu/kernel_generator.hpp>
+#include <graphblas_gpu/terminate_condition.hpp>

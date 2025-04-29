@@ -12,9 +12,6 @@
 namespace graphblas_gpu {
 
 
-// We shoudl support multiply compressed format and build
-// runtime classification layer based on sparsity pattern of input
-      
 
 template <typename T>
 class SparseMatrix {
@@ -70,7 +67,6 @@ public:
         const std::vector<int>& sell_col_indices,
         const std::vector<Value>& sell_values);
     
-    // Staging op constructor  (later on add a data format field as input here)
     SparseMatrix(size_t rows, size_t cols, size_t buffer_id);
 
     // Basic properties that work with all formats

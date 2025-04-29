@@ -1,5 +1,6 @@
 #include <graphblas_gpu/op_compiler.hpp>
 #include <graphblas_gpu/kernel_generator.hpp>
+#include <graphblas_gpu/termination_condition.hpp>
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include <unistd.h>
 #include <iostream>
 #include <algorithm>
+#include <optional>
 
 namespace graphblas_gpu {
 
@@ -77,6 +79,16 @@ void OpCompiler::allocateBuffers() {
         const auto& op = ops[i];
 
         switch (op.type) {
+
+            case Op::Type::EWiseAddInPlace:
+            case Op::Type::EWiseSubInPlace:
+            case Op::Type::EWiseMulInPlace:
+            case Op::Type::EWiseDivInPlace:
+            case Op::Type::Copy: {
+                // These are all in-place operations so we don't need to
+                // allocate new memory.
+                break;
+            }
             case Op::Type::AllocVector: {
                 size_t buffer_id = op.buffer_ids[0];
                 size_t vec_size = std::stoul(op.args.at("size"));
@@ -165,7 +177,7 @@ void OpCompiler::allocateBuffers() {
                 size_t vec_buffer_id = op.buffer_ids[2];
                 std::string datatype_str = op.args.at("datatype");
                 
-                // Parse the datatype string to get a DataType object
+                
                 DataType datatype;
                 try {
                     datatype = dataTypeFromString(datatype_str);
@@ -220,7 +232,6 @@ void OpCompiler::allocateBuffers() {
                 size_t rhs_buffer_id = op.buffer_ids[2];
                 std::string datatype_str = op.args.at("datatype");
                 
-                // Parse the datatype string to get a DataType object
                 DataType datatype;
                 try {
                     datatype = dataTypeFromString(datatype_str);
@@ -229,7 +240,6 @@ void OpCompiler::allocateBuffers() {
                     datatype = DataType(DataTypeEnum::Float);
                 }
 
-                // Check if the input buffers exist
                 if (buffer_info_map.find(lhs_buffer_id) == buffer_info_map.end() ||
                     buffer_info_map.find(rhs_buffer_id) == buffer_info_map.end()) {
                     continue;
@@ -238,12 +248,11 @@ void OpCompiler::allocateBuffers() {
                 const auto& lhs_info = buffer_info_map.at(lhs_buffer_id);
                 const auto& rhs_info = buffer_info_map.at(rhs_buffer_id);
                 
-                // Verify dimensions are compatible
                 if (lhs_info.rows != rhs_info.rows || lhs_info.cols != rhs_info.cols) {
                     std::cerr << "  WARNING: Dimension mismatch in element-wise operation!" << std::endl;
                 }
                 
-                size_t result_size = lhs_info.rows * lhs_info.cols; // same as lhs/rhs
+                size_t result_size = lhs_info.rows * lhs_info.cols; 
                 size_t buffer_size = result_size * datatype.sizeInBytes();
 
                 buffer_info_map[result_buffer_id] = {
@@ -267,7 +276,7 @@ void OpCompiler::allocateBuffers() {
     }
     std::sort(buffer_ids.begin(), buffer_ids.end()); 
     // Now we assign offsets and total buffer size to allocate on device
-    // should we allocate buffers that end up not being used in computation
+    // should we allocate for buffers that end up not being used in computation
     // or is that user's responsibility..
     for (size_t buffer_id : buffer_ids) {
         const auto& buf_info = buffer_info_map[buffer_id];
@@ -275,7 +284,6 @@ void OpCompiler::allocateBuffers() {
         buffer_offsets_[buffer_id] = total_memory_bytes_;
         total_memory_bytes_ += aligned_size;
 
-        std::cout << "BUFFER ID: " << buffer_id << ", OFFSET: " << buffer_offsets_[buffer_id] << std::endl;
     }
 
     if (total_memory_bytes_ > 0) {
@@ -285,8 +293,9 @@ void OpCompiler::allocateBuffers() {
                       << cudaGetErrorString(error) << std::endl;
             throw std::runtime_error("Failed to allocate GPU memory");
         }
+        /* 
         std::cout << "Successfully allocated " << (total_memory_bytes_ / (1024.0 * 1024.0)) 
-                  << " MB of GPU memory at " << device_memory_ << std::endl;
+                  << " MB of GPU memory at " << device_memory_ << std::endl;*/
                   
         // Initialize all memory to zero
         cudaMemset(device_memory_, 0, total_memory_bytes_);
@@ -303,7 +312,6 @@ void OpCompiler::generateKernel() {
     kernel_code_ = generator.generateCode();
     kernel_name_ = generator.getKernelName();
     
-    
     // Compile the kernel
     kernel_loaded_ = compileAndLoadKernel(kernel_code_);
     
@@ -313,7 +321,7 @@ void OpCompiler::generateKernel() {
 }
 
 bool OpCompiler::compileAndLoadKernel(const std::string& kernel_code) {
-    // Generate a unique filename based on a hash of the kernel code
+    // hash the kernel code string to give us unique filename
     std::string hash = std::to_string(std::hash<std::string>{}(kernel_code));
     std::string temp_dir = "/tmp";
     std::string code_file_path = temp_dir + "/graphblas_kernel_" + hash + ".cu";
@@ -371,7 +379,7 @@ bool OpCompiler::compileAndLoadKernel(const std::string& kernel_code) {
             return false;
         }
         
-        std::cout << "Kernel compilation successful" << std::endl;
+        //std::cout << "Kernel compilation successful" << std::endl;
     }
     
     // Load the compiled binary
@@ -417,7 +425,9 @@ bool OpCompiler::is_file_exists(const std::string& filename) {
     return file.good();
 }
 
-void OpCompiler::execute(int iterations) {
+void OpCompiler::execute(std::optional<int> iterations, 
+                        cudaEvent_t* timing_start, 
+                        cudaEvent_t* timing_stop) {
     if (!is_compiled_) {
         std::cerr << "Error: Call compile() before execute()" << std::endl;
         return;
@@ -427,49 +437,70 @@ void OpCompiler::execute(int iterations) {
         std::cerr << "Error: Kernel not loaded" << std::endl;
         return;
     }
+
+    int i;
+    if (iterations.has_value()) {
+        i = iterations.value();
+    } else {
+        if (!TerminationCondition::getInstance().isActive()) {
+            throw std::runtime_error("Error: Must specify iterations when no termination condition is set");
+        }
+    }
     
     // Set iteration flag for loop control
-    *iteration_flag_ = iterations;
+    *iteration_flag_ = i;
     
-    // Launch parameters
+    // Get device properties for grid
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp props;
+    cudaGetDeviceProperties(&props, device);
+    int num_sms = props.multiProcessorCount;
+    
     int block_size = 256;
-    int grid_size = std::min(65535, static_cast<int>((total_memory_bytes_ + block_size - 1) / block_size));
     
-    // If grid_size is too small, make it at least 1
+    // Max 2 per SM 
+    int data_grid_size = (total_memory_bytes_ + block_size - 1) / block_size;
+    int optimal_grid_size = num_sms * 2; 
+    
+    int grid_size = std::min(data_grid_size, optimal_grid_size);
+    
+    grid_size = std::min(grid_size, 65535);
+    
+    // Ensure we have at least 1 block
     if (grid_size < 1) grid_size = 1;
+
+    size_t smem_bytes = 0;
+    if (TerminationCondition::getInstance().isActive()) {
+        smem_bytes = sizeof(int);  
+    }
     
+    /* 
+    std::cout << "Device: " << props.name << " with " << num_sms << " SMs" << std::endl;
     std::cout << "Launching kernel with grid_size=" << grid_size 
-              << ", block_size=" << block_size << std::endl;
+              << ", block_size=" << block_size << std::endl;*/
     
     // Set up kernel arguments
     void* args[] = {&device_memory_, iteration_flag_};
 
-    /* 
-        
-    // cooperative kernel has strong limitation on max threads..
-    // perahps we can case on whether or not we do coopeartive
-    // kernel launch or regular launch with our own custom grid sync.
-    CUresult result = cuLaunchKernel(
-        kernel_function_,
-        grid_size, 1, 1,             // Grid dimensions
-        block_size, 1, 1,            // Block dimensions
-        0,                           // Shared mem size
-        nullptr,                     // Stream
-        args,                        // Args
-        nullptr                      
-    );
-    
-    */
+    // For testing purposes
+    if (timing_start) cudaEventRecord(*timing_start);
     
     // Launch the kernel
     CUresult result = cuLaunchCooperativeKernel(
         kernel_function_,
-        grid_size, 1, 1,             // Grid dimensions
-        block_size, 1, 1,            // Block dimensions
-        0,                           // Shared mem size
-        nullptr,                     // Stream
-        args                         // Args                    
+        grid_size, 1, 1,             
+        block_size, 1, 1,           
+        smem_bytes,                  
+        nullptr,                    
+        args                                    
     );
+    
+    if (timing_stop) {
+        cudaEventRecord(*timing_stop);
+        cudaEventSynchronize(*timing_stop);
+    }
+
     
     if (result != CUDA_SUCCESS) {
         const char* error_str;
@@ -478,12 +509,15 @@ void OpCompiler::execute(int iterations) {
         return;
     }
     
-    // Synchronize to ensure completion
-    result = cuCtxSynchronize();
-    if (result != CUDA_SUCCESS) {
-        const char* error_str;
-        cuGetErrorString(result, &error_str);
-        std::cerr << "Error synchronizing context: " << error_str << std::endl;
+    if (!timing_stop) {
+        result = cuCtxSynchronize();
+        if (result != CUDA_SUCCESS) {
+            const char* error_str;
+            cuGetErrorString(result, &error_str);
+            std::cerr << "Error synchronizing context: " << error_str << std::endl;
+        } else {
+            // std::cout << "Kernel execution completed successfully" << std::endl;
+        }
     }
 }
 
@@ -553,6 +587,28 @@ void OpCompiler::copyDeviceToHost(void* host_data, size_t buffer_id, size_t size
     void* device_ptr = static_cast<char*>(device_memory_) + it->second;
     cudaMemcpy(host_data, device_ptr, size_bytes, cudaMemcpyDeviceToHost);
 }
+
+template <typename T>
+void OpCompiler::copyDeviceToHost(std::vector<T>& host_vec, const Vector<T>& device_vec) {
+    if (!is_compiled_) {
+        std::cerr << "Error: Call compile() before copying data" << std::endl;
+        return;
+    }
+    if (host_vec.size() != device_vec.size()) {
+        std::cerr << "Error: Host vector and device vector must have same size" << std::endl;
+        return;
+    }
+
+    auto it = buffer_offsets_.find(device_vec.bufferId());
+    if (it == buffer_offsets_.end()) {
+        std::cerr << "Error: Buffer ID not found" << std::endl;
+        return;
+    }
+
+    void* device_ptr = static_cast<char*>(device_memory_) + it->second;
+    cudaMemcpy(host_vec.data(), device_ptr, device_vec.size() * sizeof(T), cudaMemcpyDeviceToHost);
+}
+
 
 template <typename T>
 void OpCompiler::copyHostToDevice(const Vector<T>& vec) {
@@ -643,5 +699,9 @@ template void OpCompiler::copyHostToDevice<int>(const Vector<int>&);
 template void OpCompiler::copyHostToDevice<float>(const SparseMatrix<float>&);
 template void OpCompiler::copyHostToDevice<double>(const SparseMatrix<double>&);
 template void OpCompiler::copyHostToDevice<int>(const SparseMatrix<int>&);
+
+template void graphblas_gpu::OpCompiler::copyDeviceToHost<float>(std::vector<float>&, const graphblas_gpu::Vector<float>&);
+template void graphblas_gpu::OpCompiler::copyDeviceToHost<double>(std::vector<double>&, const graphblas_gpu::Vector<double>&);
+template void graphblas_gpu::OpCompiler::copyDeviceToHost<int>(std::vector<int>&, const graphblas_gpu::Vector<int>&);
 
 } // namespace graphblas_gpu

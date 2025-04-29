@@ -23,6 +23,27 @@ template <typename T>
 __device__ inline void ewise_div(const T* a, const T* b, T* c, 
                                size_t index);
 
+template <typename T>
+__device__ inline void ewise_or (const T* a, const T* b, T* c, 
+                               size_t index);
+
+
+// In-place 
+template <typename T>
+__device__ inline void ewise_add_inplace(T* a, const T* b, size_t index);
+
+template <typename T>
+__device__ inline void ewise_sub_inplace(T* a, const T* b, size_t index);
+
+template <typename T>
+__device__ inline void ewise_mul_inplace(T* a, const T* b, size_t index);
+
+template <typename T>
+__device__ inline void ewise_div_inplace(T* a, const T* b, size_t index);
+                               
+template <typename T>
+__device__ inline void ewise_or_inplace(T* dst, const T* src, size_t index);
+
 } // namespace kernels
 } // namespace graphblas_gpu
 

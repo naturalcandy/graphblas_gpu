@@ -10,7 +10,10 @@
 #include <iostream>
 #include <set>
 #include <string>
+#include <optional>
 #include <cuda.h>
+#include <cuda_runtime.h>
+
 
 
 namespace graphblas_gpu {
@@ -25,12 +28,14 @@ public:
     void compile();
     
     // Execute compiled sequence
-    void execute(int iterations = 1);
+    void execute(std::optional<int> iterations = 1, 
+                cudaEvent_t* timing_start = nullptr, 
+                cudaEvent_t* timing_stop = nullptr);
     
     // Clean up resources
     void reset();
     
-    // Access for allocated memory and other resources
+    // Access for allocated memory
     void* getBuffer(size_t buffer_id);
     
     // Copy data between host and device
@@ -42,6 +47,11 @@ public:
 
     template <typename T>
     void copyHostToDevice(const SparseMatrix<T>& matrix);
+
+    template <typename T>
+    void copyDeviceToHost(std::vector<T>& host_vec, const Vector<T>& device_vec);
+    
+
     
 private:
     OpCompiler();
@@ -61,13 +71,13 @@ private:
     // Map buffer IDs to GPU memory offsets
     std::unordered_map<size_t, size_t> buffer_offsets_;
     
-    // Total memory size needed for the program
+    // Total memory size needed
     size_t total_memory_bytes_;
     
     // GPU memory
     void* device_memory_;
     
-    // Atomic for loop control
+    // Loop control
     int* iteration_flag_;
 
     // Runtime compilation

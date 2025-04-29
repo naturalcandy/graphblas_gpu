@@ -17,7 +17,14 @@ struct Op {
         EWiseAdd,
         EWiseSub,
         EWiseMul,
-        EWiseDiv
+        EWiseDiv,
+        EWiseOr, 
+        EWiseAddInPlace,
+        EWiseSubInPlace,
+        EWiseMulInPlace,
+        EWiseDivInPlace,
+        EWiseOrInPlace,
+        Copy
     };
 
     Type type;

@@ -22,6 +22,7 @@ set(GRAPHBLAS_CPU_SRC
     src/op_sequence.cpp
     src/op_compiler.cpp
     src/kernel_generator.cpp
+    src/termination_condition.cpp
 )
 
 set(GRAPHBLAS_GPU_SRC
@@ -53,4 +54,7 @@ target_link_libraries(graphblas_gpu ${CUDA_DRIVER_LIB})
 install(DIRECTORY include/ DESTINATION include)
 install(TARGETS graphblas_gpu DESTINATION lib)
 
+add_subdirectory(utils)
+
 add_subdirectory(tests)
+add_subdirectory(benchmarks)
