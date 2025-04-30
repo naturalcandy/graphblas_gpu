@@ -1,4 +1,3 @@
-// utils/src/matrix_generators.cpp
 #include <graphblas_gpu_utils/matrix_generators.hpp>
 #include <random>
 #include <algorithm>

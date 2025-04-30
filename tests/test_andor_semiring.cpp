@@ -1,4 +1,3 @@
-// test_logical_semiring.cpp
 #include <graphblas_gpu/vector.hpp>
 #include <graphblas_gpu/operation.hpp>
 #include <graphblas_gpu/graph.hpp>

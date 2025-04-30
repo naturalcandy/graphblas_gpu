@@ -1,4 +1,3 @@
-// termination_condition.cpp
 #include <graphblas_gpu/termination_condition.hpp>
 
 namespace graphblas_gpu {

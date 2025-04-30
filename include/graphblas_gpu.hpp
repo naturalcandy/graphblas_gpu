@@ -1,4 +1,3 @@
-// include/graphblas_gpu.hpp
 #pragma once
 
 #include <graphblas_gpu/data_type.hpp>

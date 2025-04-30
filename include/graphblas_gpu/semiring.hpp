@@ -7,7 +7,6 @@ enum class SemiringType {
     Arithmetic,     // Standard arithmetic (+, *)
     LogicalOrAnd   // Logical OR and AND semiring
     
-    // Enough for now...
 };
 
 } // namespace graphblas_gpu

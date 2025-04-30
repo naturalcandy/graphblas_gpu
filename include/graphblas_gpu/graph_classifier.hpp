@@ -1,4 +1,3 @@
-// graph_classifier.hpp
 #ifndef GRAPHBLAS_GPU_GRAPH_CLASSIFIER_HPP
 #define GRAPHBLAS_GPU_GRAPH_CLASSIFIER_HPP
 
