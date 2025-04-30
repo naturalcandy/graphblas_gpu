@@ -1,4 +1,3 @@
-// utils/include/graphblas_gpu_utils/matrix_generators.hpp
 #pragma once
 
 #include <vector>

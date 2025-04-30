@@ -61,7 +61,7 @@ private:
     OpCompiler(const OpCompiler&) = delete;
     OpCompiler& operator=(const OpCompiler&) = delete;
     
-    void allocateBuffers();
+    void planBufferLayout();
     void generateKernel();
     bool compileAndLoadKernel(const std::string& kernel_code);
     
@@ -72,7 +72,7 @@ private:
     std::unordered_map<size_t, size_t> buffer_offsets_;
     
     // Total memory size needed
-    size_t total_memory_bytes_;
+    size_t total_bytes_;
     
     // GPU memory
     void* device_memory_;

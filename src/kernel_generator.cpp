@@ -11,11 +11,9 @@
 namespace graphblas_gpu {
 
 KernelGenerator::KernelGenerator(const std::vector<Op>& operations,
-                                const std::unordered_map<size_t, size_t>& buffer_id_to_offset,
-                                const std::set<size_t>& extra_buffer_ids)
+                                const std::unordered_map<size_t, size_t>& buffer_id_to_offset)
     : operations_(operations),
       buffer_id_to_offset_(buffer_id_to_offset),
-      extra_buffer_ids_(extra_buffer_ids),
       kernel_name_("graphblas_gpu_kernel") {}
 
 std::string KernelGenerator::getKernelName() const {
@@ -29,12 +27,7 @@ std::string KernelGenerator::generateCode() {
     ss << "#include <cooperative_groups.h>\n\n";
     ss << "namespace cg = cooperative_groups;\n\n";
 
-    ss << "extern \"C\" __global__ void " << kernel_name_ << "(char* buffer, int num_iterations";
-
-    for (auto buf_id : extra_buffer_ids_) {
-        ss << ", void* ext_buf_" << buf_id;
-    }
-    ss << ") {\n";
+    ss << "extern \"C\" __global__ void " << kernel_name_ << "(char* buffer, int num_iterations) {\n";
     
     ss << "    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;\n";
     ss << "    size_t grid_size = gridDim.x * blockDim.x;\n\n";
@@ -81,8 +74,8 @@ std::string KernelGenerator::generateCode() {
                 case Op::Type::EWiseMulInPlace:
                 case Op::Type::EWiseDivInPlace:
                 case Op::Type::EWiseOrInPlace:  {
-                    size_t aId = op.buffer_ids[0];  // dst
-                    size_t bId = op.buffer_ids[1];  // src
+                    size_t aId = op.buffer_ids[0];  
+                    size_t bId = op.buffer_ids[1];  
                     auto aOff = buffer_id_to_offset_.at(aId);
                     auto bOff = buffer_id_to_offset_.at(bId);
 
@@ -105,12 +98,12 @@ std::string KernelGenerator::generateCode() {
                     break;
                 }
                 case Op::Type::SpMV: {
-                    size_t resultId = op.buffer_ids[0];
+                    size_t resId = op.buffer_ids[0];
                     size_t matrixId = op.buffer_ids[1];
                     size_t vectorId = op.buffer_ids[2];
-                    size_t resultOffset = buffer_id_to_offset_.at(resultId);
-                    size_t matrixOffset = buffer_id_to_offset_.at(matrixId);
-                    size_t vectorOffset = buffer_id_to_offset_.at(vectorId);
+                    size_t resOffset = buffer_id_to_offset_.at(resId);
+                    size_t matOffset = buffer_id_to_offset_.at(matrixId);
+                    size_t vecOffset = buffer_id_to_offset_.at(vectorId);
 
                     std::string datatype = op.args.at("datatype");
                     size_t num_rows = std::stoul(op.args.at("num_rows"));
@@ -123,14 +116,12 @@ std::string KernelGenerator::generateCode() {
                         size_t mask_buffer_id = op.buffer_ids[3];
                         maskOffset = buffer_id_to_offset_.at(mask_buffer_id);
                     }
-
                     if (in_place) {
-                        resultOffset = vectorOffset;
+                        resOffset = vecOffset;
                     }
-
                     if (format == "CSR") {
-                        size_t row_offsets_offset = matrixOffset;
-                        size_t col_indices_offset = matrixOffset + (num_rows + 1) * sizeof(size_t);
+                        size_t row_offsets_offset = matOffset;
+                        size_t col_indices_offset = matOffset + (num_rows + 1) * sizeof(size_t);
                         size_t values_offset = col_indices_offset + std::stoul(op.args.at("nnz")) * sizeof(int);
                         
                         int semiring = std::stoi(op.args.at("semiring"));
@@ -141,7 +132,7 @@ std::string KernelGenerator::generateCode() {
                         ss_inner << "        (size_t*)(buffer + " << row_offsets_offset << "),\n";
                         ss_inner << "        (int*)(buffer + " << col_indices_offset << "),\n";
                         ss_inner << "        (" << datatype << "*)(buffer + " << values_offset << "),\n";
-                        ss_inner << "        (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
+                        ss_inner << "        (" << datatype << "*)(buffer + " << vecOffset << "),\n";
                         if (mask_enabled) {
                             ss_inner << "        (" << datatype << "*)(buffer + " << maskOffset << "),\n";
                             ss_inner << "        true,\n";
@@ -149,12 +140,12 @@ std::string KernelGenerator::generateCode() {
                             ss_inner << "        nullptr,\n";
                             ss_inner << "        false,\n";
                         }
-                        ss_inner << "        (" << datatype << "*)(buffer + " << resultOffset << "),\n";
+                        ss_inner << "        (" << datatype << "*)(buffer + " << resOffset << "),\n";
                         ss_inner << "        " << num_rows << ");\n\n";
                     } 
                     else if (format == "ELL") {
                         size_t ell_size = num_rows * std::stoul(op.args.at("max_nnz_per_row"));
-                        size_t col_idx_offset = matrixOffset;
+                        size_t col_idx_offset = matOffset;
                         size_t val_offset = col_idx_offset + ell_size * sizeof(int);
 
                         int semiring = std::stoi(op.args.at("semiring"));
@@ -164,7 +155,7 @@ std::string KernelGenerator::generateCode() {
                         ss_inner << "    graphblas_gpu::kernels::" << func_name << "<" << datatype << ">(\n";
                         ss_inner << "        (int*)(buffer + " << col_idx_offset << "),\n";
                         ss_inner << "        (" << datatype << "*)(buffer + " << val_offset << "),\n";
-                        ss_inner << "        (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
+                        ss_inner << "        (" << datatype << "*)(buffer + " << vecOffset << "),\n";
                         if (mask_enabled) {
                             ss_inner << "        (" << datatype << "*)(buffer + " << maskOffset << "),\n";
                             ss_inner << "        true,\n";
@@ -172,14 +163,14 @@ std::string KernelGenerator::generateCode() {
                             ss_inner << "        nullptr,\n";
                             ss_inner << "        false,\n";
                         }
-                        ss_inner << "        (" << datatype << "*)(buffer + " << resultOffset << "),\n";
+                        ss_inner << "        (" << datatype << "*)(buffer + " << resOffset << "),\n";
                         ss_inner << "        " << num_rows << ",\n";
                         ss_inner << "        " << std::stoul(op.args.at("max_nnz_per_row")) << ");\n\n";
                     }
                     else if (format == "SELLC") {
                         size_t slice_size = std::stoul(op.args.at("slice_size"));
-                        size_t sptr_offset = matrixOffset;
-                        size_t slice_lengths_offset = matrixOffset + (std::stoul(op.args.at("num_rows")) / slice_size + 1) * sizeof(size_t);
+                        size_t sptr_offset = matOffset;
+                        size_t slice_lengths_offset = matOffset + (std::stoul(op.args.at("num_rows")) / slice_size + 1) * sizeof(size_t);
                         size_t col_indices_offset = slice_lengths_offset + (std::stoul(op.args.at("num_rows")) / slice_size) * sizeof(size_t);
                         size_t values_offset = col_indices_offset + std::stoul(op.args.at("sellc_len")) * sizeof(int);
 
@@ -193,7 +184,7 @@ std::string KernelGenerator::generateCode() {
                         ss_inner << "        (" << datatype << "*)(buffer + " << values_offset << "),\n";
                         ss_inner << "        " << num_rows << ",\n";
                         ss_inner << "        " << slice_size << ",\n";
-                        ss_inner << "        (" << datatype << "*)(buffer + " << vectorOffset << "),\n";
+                        ss_inner << "        (" << datatype << "*)(buffer + " << vecOffset << "),\n";
                         if (mask_enabled) {
                             ss_inner << "        (" << datatype << "*)(buffer + " << maskOffset << "),\n";
                             ss_inner << "        true,\n";
@@ -201,7 +192,7 @@ std::string KernelGenerator::generateCode() {
                             ss_inner << "        nullptr,\n";
                             ss_inner << "        false,\n";
                         }
-                        ss_inner << "        (" << datatype << "*)(buffer + " << resultOffset << "));\n\n";
+                        ss_inner << "        (" << datatype << "*)(buffer + " << resOffset << "));\n\n";
                     }
                     break;
                 }
@@ -210,7 +201,6 @@ std::string KernelGenerator::generateCode() {
                     ss_inner << "    // SpMM not yet implemented\n";
                     break;
                 }
-
                 case Op::Type::Copy: {
                     size_t dst_id = op.buffer_ids[0];
                     size_t src_id = op.buffer_ids[1];
@@ -241,51 +231,57 @@ std::string KernelGenerator::generateCode() {
     bool need_all = TerminationCondition::getInstance().requireAllThreads();
 
     if (use_term) {
-        ss << "    /* ---- termination-aware main loop ---- */\n";
+        // each block will havae a flag used to indicate the satisfaction of
+        // a termination predicate.
         ss << "    __shared__ bool block_flag;\n";
         ss << "    __device__ static int  blocks_voted = 0;\n";
         ss << "    __device__ static bool global_done  = false;\n\n";
-    
+        
+        // Loop indefinitely until we reach our terminiatio ncondition
         ss << "    while (true) {\n";
-    
-        if (need_all) {                                   // and  
+        
+        // For an AND-reduction the logical identity is true. For OR it's false
+        if (need_all) {                                   
             ss << "        if (threadIdx.x == 0) block_flag = true;\n";
         } else {                                          // or
             ss << "        if (threadIdx.x == 0) block_flag = false;\n";
         }
         ss << "        __syncthreads();\n\n";
     
-        /* fused body */
         generate_operation_body(ss);
         ss << TerminationCondition::getInstance().getConditionCode() << "\n";
-    
+        
+        // We need each thread to fold its local predicate into the block-wide flag
+        // using the correct reduction logic.
         if (need_all) {
             ss << "        if (!should_terminate) block_flag = false;\n";
         } else {
             ss << "        if (should_terminate)  block_flag = true;\n";
         }
         ss << "        __syncthreads();\n\n";
-    
-        /* one vote per block */
+        
+        // We assign a thread to increment grid wide counter to singal that it's
+        // block meets the termination predicate
         ss << "        if (threadIdx.x == 0) {\n";
         ss << "            if (block_flag) atomicAdd(&blocks_voted, 1);\n";
         ss << "        }\n";
         ss << "        grid.sync();\n\n";
     
-        /* grid-level decision */
         ss << "        if (threadIdx.x == 0 && blockIdx.x == 0) {\n";
         if (need_all) {
+            // if all blocks signal we meet termination predicate (AND) we return
             ss << "            if (blocks_voted == gridDim.x) global_done = true;\n";
         } else {
+            // if there exist at laest one block that meets termination predicate (OR) we return
             ss << "            if (blocks_voted > 0)          global_done = true;\n";
         }
-        ss << "            blocks_voted = 0;  /* reset for next iter */\n";
+        ss << "            blocks_voted = 0;\n";
         ss << "        }\n";
         ss << "        grid.sync();\n";
         ss << "        if (global_done) break;\n";
         ss << "    }\n";
     } else {
-        ss << "    /* ---- fixed-iteration main loop ---- */\n";
+        // we are just running for fixed number of iterations
         ss << "    for (int iter = 0; iter < num_iterations; ++iter) {\n";
         generate_operation_body(ss);
         ss << "        grid.sync();\n";
@@ -295,6 +291,11 @@ std::string KernelGenerator::generateCode() {
 
     std::string code = ss.str();
 
+    // since we need to support dynamic termination predicates provided by the user
+    // prior to compiling the actual kernel code, we should just do this string 
+    // replace logic where any buffer referenced in the termination condition
+    // can easily be later mapped to a GPU memory address by using the buffer id
+    // as an identifier.
     if (use_term) {
         for (const auto& [buffer_id, offset] : buffer_id_to_offset_) {
             std::string placeholder = "BUF" + std::to_string(buffer_id);
@@ -306,9 +307,6 @@ std::string KernelGenerator::generateCode() {
             }
         }
     }
-
-    
-
     return code;
 }
 

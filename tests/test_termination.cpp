@@ -14,20 +14,18 @@ int main() {
     const size_t target_node = 5;
 
     {
-        std::cout << "==== Test 1: setNodeReached ====" << std::endl;
+        std::cout << "==== Test setNodeReached ====" << std::endl;
         
-        // Frontier vector, starts all zeros
         std::vector<float> host_frontier(N, 0.0f);
         Vector<float> frontier(N, host_frontier);
 
-        // Increment vector
         std::vector<float> host_increment(N, 1.0f);
         Vector<float> increment(N, host_increment);
 
         TerminationCondition::getInstance().reset();
         TerminationCondition::getInstance().setNodeReached(target_node, frontier);
 
-        frontier += increment; // Add increment every iteration
+        frontier += increment; 
 
         auto& compiler = OpCompiler::getInstance();
         compiler.compile();
@@ -35,7 +33,7 @@ int main() {
         compiler.copyHostToDevice(frontier);
         compiler.copyHostToDevice(increment);
 
-        compiler.execute(std::nullopt); // Use termination
+        compiler.execute();
 
         std::vector<float> result(N);
         compiler.copyDeviceToHost(result, frontier);
@@ -49,15 +47,13 @@ int main() {
     }
 
     {
-        std::cout << "==== Test 2: setFrontierUnchanged ====" << std::endl;
+        std::cout << "==== Test setFrontierUnchanged ====" << std::endl;
 
-        // Two vectors that start unequal
         std::vector<float> host_v1(N, 5.0f);
         std::vector<float> host_v2(N, 2.0f);
         Vector<float> v1(N, host_v1);
         Vector<float> v2(N, host_v2);
 
-        // Increment vectors
         std::vector<float> host_inc_v1(N, 1.0f);
         std::vector<float> host_inc_v2(N, 2.0f);
         Vector<float> inc_v1(N, host_inc_v1);
@@ -85,14 +81,14 @@ int main() {
         compiler.copyDeviceToHost(result_v2, v2);
 
         std::cout << "Vector 1:\n";
-    for (size_t i = 0; i < N; ++i) {
-        std::cout << result_v1[i] << " ";
-    }
-    std::cout << "\nVector 2:\n";
-    for (size_t i = 0; i < N; ++i) {
-        std::cout << result_v2[i] << " ";
-    }
-    std::cout << "\n";
+        for (size_t i = 0; i < N; ++i) {
+            std::cout << result_v1[i] << " ";
+        }
+        std::cout << "\nVector 2:\n";
+        for (size_t i = 0; i < N; ++i) {
+            std::cout << result_v2[i] << " ";
+        }
+        std::cout << "\n";
 
         for (size_t i = 0; i < N; ++i) {
             assert(std::abs(result_v1[i] - result_v2[i]) < 1e-5f);
@@ -105,17 +101,15 @@ int main() {
     }
 
     {
-        std::cout << "==== Test 3: setBfsComplete ====" << std::endl;
+        std::cout << "==== Test setBfsComplete ====" << std::endl;
 
-        // Reuse two vectors for BfsComplete
         std::vector<float> host_frontier(N, 0.0f);
         std::vector<float> host_previous(N, 0.0f);
         Vector<float> frontier(N, host_frontier);
         Vector<float> previous(N, host_previous);
 
-        // Create an increment for frontier
         std::vector<float> host_increment(N, 0.0f);
-        host_increment[target_node] = 1.0f; // Only target node will increment
+        host_increment[target_node] = 1.0f; 
         Vector<float> increment(N, host_increment);
 
         TerminationCondition::getInstance().reset();
@@ -143,6 +137,6 @@ int main() {
 
     }
 
-    std::cout << "==== All Termination Tests Passed Successfully! ====" << std::endl;
+    std::cout << "==== AAll Tests Passed! ====" << std::endl;
     return 0;
 }

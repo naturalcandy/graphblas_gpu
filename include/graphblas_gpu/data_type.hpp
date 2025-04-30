@@ -19,7 +19,6 @@ enum class DataTypeEnum {
 
 class DataType {
 public:
-    // Default is float
     DataType() : type_(DataTypeEnum::Float) {}
     
     DataType(DataTypeEnum type) : type_(type) {}
@@ -36,7 +35,7 @@ public:
         }
     }
     
-    // Get size in bytes
+    // Get size of datatype in bytes
     size_t sizeInBytes() const {
         switch (type_) {
             case DataTypeEnum::Float: return sizeof(float);

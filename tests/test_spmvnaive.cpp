@@ -8,8 +8,6 @@
 #include <vector>
 #include <random>
 #include <chrono>
-#include <iomanip>
-#include <cstring>
 #include <string>
 #include <algorithm>
 #include <map>
@@ -36,27 +34,14 @@ void spmv_ref(const std::vector<size_t>& row_offsets,
 }
 
 
-bool verify_results(const std::vector<float>& result, 
-                    const std::vector<float>& reference,
-                    size_t& error_index,
-                    float& max_error,
-                    float tolerance = 1e-5) {
-    bool all_correct = true;
-    max_error = 0.0f;
-    
+bool verify(const std::vector<float>& result, 
+            const std::vector<float>& reference) {
     for (size_t i = 0; i < result.size(); i++) {
-        float error = std::abs(result[i] - reference[i]);
-        if (error > max_error) {
-            max_error = error;
-            error_index = i;
-        }
-        
-        if (error > tolerance) {
-            all_correct = false;
+        if (result[i] != reference[i]) {
+            return false;
         }
     }
-    
-    return all_correct;
+    return true;
 }
 
 struct TestMatrix {
@@ -99,19 +84,12 @@ bool test_format(const std::string& format,
         
         // Get result
         compiler.copyDeviceToHost(result.data(), gpu_result.bufferId(), gpu_result.bytes());
-        
-        // Verify results
-        size_t error_index = 0;
-        float max_error = 0.0f;
-        bool passed = verify_results(result, reference, error_index, max_error);
+        bool passed = verify(result, reference);
         
         if (passed) {
             std::cout << test_info << " with " << format << ": PASSED" << std::endl;
         } else {
-            std::cout << test_info << " with " << format << ": FAILED";
-            std::cout << " - Error at row " << error_index << ": " 
-                     << result[error_index] << " vs " << reference[error_index] 
-                     << " (error: " << max_error << ")" << std::endl;
+            std::cout << test_info << " with " << format << ": FAILED" << std::endl;
         }
         
         return passed;

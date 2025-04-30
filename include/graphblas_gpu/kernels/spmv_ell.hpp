@@ -4,7 +4,7 @@
 namespace graphblas_gpu{
 namespace kernels {
 
-// arithmetic semiring
+// Arithmetic semiring
 template <typename T>
 __device__ void spmv_ell(const int* col_indices,
                             const T* values,
@@ -15,7 +15,7 @@ __device__ void spmv_ell(const int* col_indices,
                             size_t num_rows,
                             size_t max_nnz_per_row);
 
-// logical or-and semiring
+// OR-AND semiring
 template <typename T>
 __device__ void spmv_ell_logical(const int* col_indices,
                                 const T* values,

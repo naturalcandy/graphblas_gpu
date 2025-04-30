@@ -17,7 +17,7 @@ __device__ void spmv_sell_c(const size_t* slice_offsets,
                             T* output
                             );
 
-// Logical OR-AND semiring
+// OR-AND semiring
 template <typename T>
 __device__ void spmv_sell_c_logical(const size_t* slice_offsets,
                                    const int* col_indices,

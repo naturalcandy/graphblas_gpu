@@ -62,7 +62,6 @@ int main() {
         graphblas_gpu::OpCompiler& compiler = graphblas_gpu::OpCompiler::getInstance();
         compiler.compile();
         
-        // Clean up
         std::cout << "\nResetting compiler..." << std::endl;
         compiler.reset();
         

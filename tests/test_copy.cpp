@@ -43,7 +43,7 @@ int main() {
         assert(result_data[i] == host_data[i]);
     }
 
-    std::cout << "Test PASSED: Vector copy is correct!" << std::endl;
+    std::cout << "PASSED" << std::endl;
 
     return 0;
 }

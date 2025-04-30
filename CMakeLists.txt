@@ -57,4 +57,3 @@ install(TARGETS graphblas_gpu DESTINATION lib)
 add_subdirectory(utils)
 
 add_subdirectory(tests)
-add_subdirectory(benchmarks)

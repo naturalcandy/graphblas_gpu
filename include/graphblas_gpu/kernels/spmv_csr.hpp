@@ -9,6 +9,8 @@ namespace graphblas_gpu{
 namespace kernels {
 
 // Thread -> Row mapping
+
+// Arithmetic semiring
 template <typename T>
 __device__ void spmv_csr(const size_t* row_offsets,
                         const int* col_indices,
@@ -42,7 +44,7 @@ __device__ void spmv_csr_vector_arithmetic(const size_t* row_offsets,
                                            T* output,
                                            size_t num_rows);
 
-// OR-AND Semiring
+// OR-AND Semiring, Warp Cooperative
 template <typename T, int THREADS_PER_ROW>
 __device__ void spmv_csr_vector_logical(const size_t* row_offsets,
                                         const int* col_indices,

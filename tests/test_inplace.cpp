@@ -25,7 +25,7 @@ int main() {
 
     Operations<float>::spmv(A, x_vec, x_vec, SemiringType::Arithmetic);
 
-    // Stage EWise ops (all in-place on x_vec)
+    // Stage EWise ops
     x_vec += y_vec;  
     x_vec -= y_vec;  
     x_vec *= y_vec;  
@@ -47,7 +47,6 @@ int main() {
     std::vector<float> result(host_x.size());
     compiler.copyDeviceToHost(result, x_vec);
 
-    // We expect to see this:
     // After SpMV: x = {3, 7, 5}
     // After adding y: x = {3+2, 7+3, 5+4} = {5, 10, 9}
     // After subbing y: x = {5-2, 10-3, 9-4} = {3, 7, 5}

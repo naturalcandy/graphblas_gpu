@@ -55,7 +55,7 @@ __device__ void spmv_csr_logical(const size_t* row_offsets,
     }
 }
 
-// vector based csr, arithmetic
+// row per warp, arithmetic
 template <typename T, int THREADS_PER_ROW>
 __device__ void spmv_csr_vector_arithmetic(const size_t* row_offsets,
                                            const int* col_indices,
@@ -67,30 +67,25 @@ __device__ void spmv_csr_vector_arithmetic(const size_t* row_offsets,
                                            size_t num_rows) {
     int row = blockIdx.x * blockDim.y + threadIdx.y;
     if (row >= num_rows) return;
-    size_t start = row_offsets[row];
-    size_t end = row_offsets[row + 1];
+    const size_t start = row_offsets[row];
+    const size_t end = row_offsets[row + 1];
 
-    T sum = T(0);
-    for (size_t i = start + threadIdx.x; i < end; i += THREADS_PER_ROW) {
-        sum += values[i] * vector[col_indices[i]];
+    T partial = T(0);
+    for (size_t p = start + threadIdx.x; p < end; p += THREADS_PER_ROW) {
+        partial += values[p] * vector[col_indices[p]];
     }
-
 #pragma unroll
-    for (int offset = THREADS_PER_ROW >> 1; offset > 0; offset >>= 1) {
-        sum += __shfl_down_sync(0xFFFFFFFF, sum, offset, THREADS_PER_ROW);
+    for (int offset = THREADS_PER_ROW / 2; offset > 0; offset /= 2) {
+        partial += __shfl_down_sync(0xFFFFFFFF, partial, offset, THREADS_PER_ROW);
     }
 
     if (threadIdx.x == 0) {
-        if (mask_enabled) {
-            output[row] = sum * T(mask[row] != T(0));
-        } else {
-            output[row] = sum;
-        }
+        output[row] = mask_enabled ? partial * T(mask[row] != T(0)) : partial;
     }
 }
 
 
-// vector based csr or-and 
+// row per warp csr or-and 
 template <typename T, int THREADS_PER_ROW>
 __device__ void spmv_csr_vector_logical(const size_t* row_offsets,
                                         const int* col_indices,
@@ -102,27 +97,25 @@ __device__ void spmv_csr_vector_logical(const size_t* row_offsets,
                                         size_t num_rows) {
     int row = blockIdx.x * blockDim.y + threadIdx.y;
     if (row >= num_rows) return;
-    size_t start = row_offsets[row];
-    size_t end = row_offsets[row + 1];
+    const size_t start = row_offsets[row];
+    const size_t end = row_offsets[row + 1];
 
-    bool result = false;
-    for (size_t i = start + threadIdx.x; i < end; i += THREADS_PER_ROW) {
-        bool val = (values[i] != 0) && (vector[col_indices[i]] != 0);
-        result = result || val;
+    bool vote = false;
+    for (size_t p = start + threadIdx.x; p < end; p += THREADS_PER_ROW) {
+        vote |= (values[p] != T(0)) && (vector[col_indices[p]] != T(0));
     }
-
+    unsigned int v = static_cast<unsigned int>(vote);
 #pragma unroll
-    for (int offset = THREADS_PER_ROW >> 1; offset > 0; offset >>= 1) {
-        bool other = __shfl_down_sync(0xFFFFFFFF, result, offset, THREADS_PER_ROW);
-        result = result || other;
+    for (int offset = THREADS_PER_ROW / 2; offset > 0; offset /= 2) {
+        v |= __shfl_down_sync(0xFFFFFFFF, v, offset, THREADS_PER_ROW);
     }
 
     if (threadIdx.x == 0) {
+        bool row_out = static_cast<bool>(v);
         if (mask_enabled) {
-            output[row] = static_cast<T>(result && (mask[row] != 0));
-        } else {
-            output[row] = static_cast<T>(result);
+            row_out = row_out && (mask[row] != T(0));
         }
+        output[row] = static_cast<T>(row_out);
     }
 }
 

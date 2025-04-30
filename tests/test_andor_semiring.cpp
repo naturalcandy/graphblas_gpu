@@ -25,7 +25,7 @@ void spmv_ref_logical(const std::vector<size_t>& row_offsets,
     }
 }
 
-bool verify_results(const std::vector<float>& result, 
+bool verify(const std::vector<float>& result, 
                     const std::vector<float>& reference) {
     if (result.size() != reference.size()) {
         std::cerr << "Size mismatch: result[" << result.size() 
@@ -33,24 +33,23 @@ bool verify_results(const std::vector<float>& result,
         return false;
     }
     
-    bool all_correct = true;
+    bool correct = true;
     
     for (size_t i = 0; i < result.size(); i++) {
         if (result[i] != reference[i]) {
-            all_correct = false;
+            correct = false;
         }
     }
-    if (!all_correct) {
+    if (!correct) {
         std::cout << "Error" << std::endl;
     }
     
-    return all_correct;
+    return correct;
 }
 
 int main() {
     using namespace graphblas_gpu;
     
-    // Simple test matrix
     // 0 1 0
     // 1 0 1
     // 0 1 1
@@ -61,7 +60,6 @@ int main() {
     std::vector<int> col_indices = {1, 0, 2, 1, 2};
     std::vector<float> values = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     
-    // Create test vectors
     std::vector<std::vector<float>> test_vectors = {
         {1.0f, 1.0f, 1.0f},   
         {0.0f, 1.0f, 0.0f},   
@@ -120,7 +118,7 @@ int main() {
         std::cout << std::endl;
         
         // Verify results
-        bool passed = verify_results(result, reference);
+        bool passed = verify(result, reference);
         if (passed) {
             std::cout << "Test #" << (test_idx + 1) << " PASSED!" << std::endl;
         } else {

@@ -5,21 +5,16 @@
 #include <vector>
 #include <cstddef>
 #include <string>
+#include <cmath>
 #include <algorithm>
 
 namespace graphblas_gpu {
 
 class GraphClassifier {
 public:
-    /* Format classification,  we will implement later
-    static std::string determineOptimalFormat(
-        const std::vector<size_t>& row_offsets,
-        const std::vector<int>& col_indices,
-        size_t rows, size_t cols); */
     
-    // maybe we could implement these conversion functions to be on device side 
-    // if we have time... 
-    
+    static std::string chooseFormat(const std::vector<size_t>& row_offsets,
+                                    size_t rows);
     // CSR to ELL
     template <typename T>
     static void csr_to_ell(
@@ -73,18 +68,17 @@ public:
     static void csr_transpose(
         size_t rows, size_t cols,
         const std::vector<size_t>& row_offsets,
-        const std::vector<int>&    col_indices,
-        const std::vector<T>&      values,
-        std::vector<size_t>&       row_offsets_T,
-        std::vector<int>&          col_indices_T,
-        std::vector<T>&            values_T);
+        const std::vector<int>& col_indices,
+        const std::vector<T>& values,
+        std::vector<size_t>& row_offsets_T,
+        std::vector<int>& col_indices_T,
+        std::vector<T>& values_T);
 
 
 private:
     static size_t countNonPadding(const std::vector<int>& col_indices);
 };
 
-// Helper function to count non-padding elements
 inline size_t GraphClassifier::countNonPadding(const std::vector<int>& col_indices) {
     size_t count = 0;
     for (const auto& col : col_indices) {
@@ -93,6 +87,38 @@ inline size_t GraphClassifier::countNonPadding(const std::vector<int>& col_indic
         }
     }
     return count;
+}
+
+inline std::string GraphClassifier::chooseFormat(const std::vector<size_t>& row_offsets,
+                                                 size_t rows)
+{
+    const size_t nnz_total = row_offsets.back();
+    const double mean = static_cast<double>(nnz_total) / rows;
+
+    size_t max_nnz = 0;
+    double var_acc = 0.0;
+
+    for (size_t r = 0; r < rows; ++r) {
+        const size_t len = row_offsets[r + 1] - row_offsets[r];
+        max_nnz = std::max(max_nnz, len);
+        const double diff = static_cast<double>(len) - mean;
+        var_acc += diff * diff;
+    }
+
+    const double variance = var_acc / rows;
+    const double cv = (mean == 0.0) ? 0.0 : (std::sqrt(variance) / mean);
+
+    constexpr size_t ELL_ROW_LIMIT     = 32;   
+    constexpr double CV_LOW_THRESHOLD  = 0.25; 
+    constexpr double CV_HIGH_THRESHOLD = 0.75; 
+
+    if (cv <= CV_LOW_THRESHOLD) {
+        return (max_nnz <= ELL_ROW_LIMIT) ? "ELL" : "SELLC";
+    }
+    if (cv <= CV_HIGH_THRESHOLD) {
+        return "SELLC";
+    }
+    return "CSR";
 }
 
 // CSR to ELL conversion
@@ -125,7 +151,6 @@ void GraphClassifier::csr_to_ell(
             ell_values[i * max_nnz_per_row + k] = values[j];
         }
 
-        // Pad with -1 for columns and 0 for values
         for (; k < max_nnz_per_row; k++) {
             ell_col_indices[i * max_nnz_per_row + k] = -1;  
             ell_values[i * max_nnz_per_row + k] = T(0);
@@ -143,8 +168,6 @@ void GraphClassifier::ell_to_csr(
     std::vector<size_t>& row_offsets,
     std::vector<int>& col_indices,
     std::vector<T>& values) {
-    
-    // Count non-padding elements to determine CSR array sizes
     size_t nnz = 0;
     for (size_t i = 0; i < num_rows; i++) {
         for (size_t j = 0; j < max_nnz_per_row; j++) {
@@ -154,16 +177,11 @@ void GraphClassifier::ell_to_csr(
             }
         }
     }
-
-    // Resize output vectors
     row_offsets.resize(num_rows + 1);
     col_indices.resize(nnz);
     values.resize(nnz);
-
-    // Convert ELL to CSR
     size_t nnz_counter = 0;
     row_offsets[0] = 0;
-
     for (size_t i = 0; i < num_rows; i++) {
         for (size_t j = 0; j < max_nnz_per_row; j++) {
             size_t idx = i * max_nnz_per_row + j;
@@ -202,12 +220,11 @@ void GraphClassifier::csr_to_sellc(
         {
             const size_t row = s * slice_size + r;
             if (row >= num_rows) break;
-
             const size_t row_nnz = row_offsets[row + 1] - row_offsets[row];
             max_nnz = std::max(max_nnz, row_nnz);
         }
         slice_lengths[s] = max_nnz;            
-        total_vals      += max_nnz * slice_size;
+        total_vals += max_nnz * slice_size;
     }
 
     slice_ptrs[0] = 0;
@@ -215,28 +232,26 @@ void GraphClassifier::csr_to_sellc(
         slice_ptrs[s] = slice_ptrs[s - 1] + slice_lengths[s - 1] * slice_size;
 
     sell_col_indices.assign(total_vals, -1);
-    sell_values      .assign(total_vals, T(0));
+    sell_values.assign(total_vals, T(0));
 
     for (size_t s = 0; s < num_slices; ++s)
     {
         const size_t slice_offset = slice_ptrs[s];
-        const size_t k_max        = slice_lengths[s];
-
-        // local row
+        const size_t k_max = slice_lengths[s];
         for (size_t r = 0; r < slice_size; ++r)            
         {
             const size_t global_row = s * slice_size + r;
             if (global_row >= num_rows) break;
 
             const size_t row_start = row_offsets[global_row];
-            const size_t row_end   = row_offsets[global_row + 1];
-            const size_t row_nnz   = row_end - row_start;
+            const size_t row_end = row_offsets[global_row + 1];
+            const size_t row_nnz = row_end - row_start;
 
             for (size_t k = 0; k < row_nnz; ++k)
             {
                 const size_t dst = slice_offset + k * slice_size + r; 
                 sell_col_indices[dst] = col_indices[row_start + k];
-                sell_values      [dst] = values     [row_start + k];
+                sell_values[dst] = values[row_start + k];
             }
             
         }
@@ -257,16 +272,13 @@ void GraphClassifier::sellc_to_csr(
     std::vector<int>& col_indices,
     std::vector<T>& values) {
     
-    // Count non-padding elements to determine CSR array sizes
     size_t num_slices = (num_rows + slice_size - 1) / slice_size;
     size_t nnz = 0;
-    
     for (const auto& col : sell_col_indices) {
         if (col != -1) {  
             nnz++;
         }
     }
-    
     row_offsets.resize(num_rows + 1);
     col_indices.resize(nnz);
     values.resize(nnz);
@@ -303,11 +315,11 @@ template <typename T>
 void GraphClassifier::csr_transpose(
         size_t rows, size_t cols,
         const std::vector<size_t>& row_offsets,
-        const std::vector<int>&    col_indices,
-        const std::vector<T>&      values,
-        std::vector<size_t>&       row_offsets_T,
-        std::vector<int>&          col_indices_T,
-        std::vector<T>&            values_T)
+        const std::vector<int>& col_indices,
+        const std::vector<T>& values,
+        std::vector<size_t>& row_offsets_T,
+        std::vector<int>& col_indices_T,
+        std::vector<T>& values_T)
 {
     const size_t nnz = col_indices.size();
     row_offsets_T.resize(cols + 1, 0);
@@ -327,10 +339,10 @@ void GraphClassifier::csr_transpose(
 
     for (size_t r = 0; r < rows; ++r) {
         for (size_t p = row_offsets[r]; p < row_offsets[r + 1]; ++p) {
-            int    c   = col_indices[p];
+            int c = col_indices[p];
             size_t dst = cursor[c]++;
             col_indices_T[dst] = static_cast<int>(r);  
-            values_T     [dst] = values[p];
+            values_T[dst] = values[p];
         }
     }
 }

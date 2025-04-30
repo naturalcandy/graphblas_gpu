@@ -18,6 +18,8 @@ class SparseMatrix {
 public:
     using Value = T;
 
+    // These are the underlying representations of our graph primitives.
+
     // CSR
     struct CSRData {
         std::vector<size_t> row_offsets;
@@ -59,7 +61,7 @@ public:
         const std::vector<int>& ell_col_indices,
         const std::vector<Value>& ell_values);
     
-    // SELLC initialization constructor
+    // SELL-C initialization constructor
     SparseMatrix(size_t rows, size_t cols,
         size_t slice_size,
         const std::vector<size_t>& slice_ptrs,
@@ -67,6 +69,7 @@ public:
         const std::vector<int>& sell_col_indices,
         const std::vector<Value>& sell_values);
     
+    // Output of intemediate operation constructor 
     SparseMatrix(size_t rows, size_t cols, size_t buffer_id);
 
     // Basic properties that work with all formats
@@ -145,7 +148,6 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
       format_("ELL"),
       format_data_(ELLData{max_nnz_per_row, ell_col_indices, ell_values})
 {
-    // Validate inputs
     if (ell_col_indices.size() != rows * max_nnz_per_row) {
         throw std::invalid_argument(
             "ELL column indices array size mismatch. Expected " + 
@@ -192,7 +194,6 @@ SparseMatrix<T>::SparseMatrix(size_t rows, size_t cols,
       datatype_name_(datatype_.toString()),
       format_data_(SELLCData{slice_size, slice_ptrs, slice_lengths, sell_col_indices, sell_values})
 {
-    // Validate input sizes
     size_t num_slices = (rows + slice_size - 1) / slice_size;
     if (slice_ptrs.size() != num_slices + 1) {
         throw std::invalid_argument(

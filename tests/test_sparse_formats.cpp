@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <vector>
 #include <graphblas_gpu/graph_classifier.hpp>
-#include <iomanip>
 
 using namespace graphblas_gpu;
 
