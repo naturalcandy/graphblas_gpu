@@ -32,8 +32,9 @@ __device__ void spmv_csr_logical(const size_t* row_offsets,
                                     T* output,
                                     size_t num_rows);
 
+// Warp -> Row mapping
 
-// Warp Cooperative
+// Arithmetic semiring
 template <typename T, int THREADS_PER_ROW>
 __device__ void spmv_csr_vector_arithmetic(const size_t* row_offsets,
                                            const int* col_indices,
@@ -44,7 +45,7 @@ __device__ void spmv_csr_vector_arithmetic(const size_t* row_offsets,
                                            T* output,
                                            size_t num_rows);
 
-// OR-AND Semiring, Warp Cooperative
+// OR-AND Semiring
 template <typename T, int THREADS_PER_ROW>
 __device__ void spmv_csr_vector_logical(const size_t* row_offsets,
                                         const int* col_indices,

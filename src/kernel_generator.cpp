@@ -260,7 +260,7 @@ std::string KernelGenerator::generateCode() {
         }
         ss << "        __syncthreads();\n\n";
         
-        // We assign a thread to increment grid wide counter to singal that it's
+        // We assign a thread to increment grid wide counter to singal that its
         // block meets the termination predicate
         ss << "        if (threadIdx.x == 0) {\n";
         ss << "            if (block_flag) atomicAdd(&blocks_voted, 1);\n";
@@ -298,12 +298,12 @@ std::string KernelGenerator::generateCode() {
     // as an identifier.
     if (use_term) {
         for (const auto& [buffer_id, offset] : buffer_id_to_offset_) {
-            std::string placeholder = "BUF" + std::to_string(buffer_id);
-            std::string replacement = "(buffer + " + std::to_string(offset) + ")";
+            std::string old = "BUF" + std::to_string(buffer_id);
+            std::string new = "(buffer + " + std::to_string(offset) + ")";
             size_t pos = 0;
-            while ((pos = code.find(placeholder, pos)) != std::string::npos) {
-                code.replace(pos, placeholder.length(), replacement);
-                pos += replacement.length();
+            while ((pos = code.find(old, pos)) != std::string::npos) {
+                code.replace(pos, old.length(), new);
+                pos += new.length();
             }
         }
     }

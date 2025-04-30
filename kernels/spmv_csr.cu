@@ -3,7 +3,7 @@
 namespace graphblas_gpu{
 namespace kernels {
 
-// thread -> row, arithmetic csr
+// thread -> row arithmetic
 template <typename T>
 __device__ void spmv_csr(const size_t* row_offsets,
                         const int* col_indices,
@@ -28,7 +28,7 @@ __device__ void spmv_csr(const size_t* row_offsets,
     }
 }
 
-// thread -> row, or-and csr
+// thread -> row, or-and
 template <typename T>
 __device__ void spmv_csr_logical(const size_t* row_offsets,
                                  const int* col_indices,
@@ -85,7 +85,7 @@ __device__ void spmv_csr_vector_arithmetic(const size_t* row_offsets,
 }
 
 
-// row per warp csr or-and 
+// row per warp or-and 
 template <typename T, int THREADS_PER_ROW>
 __device__ void spmv_csr_vector_logical(const size_t* row_offsets,
                                         const int* col_indices,

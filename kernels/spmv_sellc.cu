@@ -38,7 +38,6 @@ __device__ void spmv_sell_c(const size_t* slice_offsets,
     }
 
     if (mask_enabled) {
-        // Fast multiplication-based masking
         output[global_row] = sum * T(mask[global_row] != T(0));
     } else {
         output[global_row] = sum;
@@ -76,7 +75,7 @@ __device__ void spmv_sell_c_logical(const size_t* slice_offsets,
         if (col != -1) {
             bool val = (values[idx] != 0) && (vector[col] != 0);
             result = result || val;
-            if (result) break;  // Early exit optimization
+            if (result) break; 
         }
     }
 
